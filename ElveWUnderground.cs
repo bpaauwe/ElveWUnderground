@@ -3,20 +3,25 @@
 //
 // ElveWUnderground
 //
-// Copyright (C) 2011 Robert Paauwe
+// Copyright (C) 2011 by Robert Paauwe
 //
-//   This program is free software; you can redistribute it and/or modify it
-//   under the terms of the GNU General Public License as published by the Free
-//   Software Foundation; either version 2 of the License, or (at your option)
-//   any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 // 
-//   This program is distributed in the hope that it will be useful, but WITHOUT
-//   ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-//   FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-//   more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 // 
-//   You should have received a copy of the GNU General Public License along
-//   with this program. If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
 //----------------------------------------------------------------------------
 //
 // A driver that queries the Weather Underground for weather data. Pulls 
@@ -89,26 +94,29 @@ using System.IO;
 using System.Xml;
 using System.Net;
 using System.Net.Sockets;
+using System.Linq;
 
 namespace ElveWUnderground {
 
 	[Driver(
 			"Weather Underground",
-			"This driver pulls weather data from the Weather Underground.",
+			"This driver pulls weather data from the Weather Underground based " +
+			"on a personal weather station ID. The station ID can be found at " +
+			"http://www.wunderground.com/weatherstation/index.asp.",
 			"Robert Paauwe",
 			"Weather",
 			"",
-			"WeatherUnderground",
+			"weather",
 			DriverCommunicationPort.Network,
 			DriverMultipleInstances.MultiplePerDriverService,
 			1, // Major version
 			0, // Minor version
 			DriverReleaseStages.Production,
-			"Bobsplace Media Engineering",
-			"http://www.bobsplace.com/",
+			"Weather Underground, Inc.",
+			"http://www.wunderground.com/",
 			null
 			)]
-	public partial class ElveWUndergroundDriver : Driver, IWeatherDriver {
+	public class ElveWUndergroundDriver : Driver, IWeatherDriver {
 		private System.Timers.Timer m_poll_timer;
 		private System.Timers.Timer m_fcast_timer;
 		private string m_station_id;
@@ -125,9 +133,10 @@ namespace ElveWUnderground {
 		// Polling interval
 		//
 		[DriverSettingAttribute("Station Identifier",
-				"The weather station identifier to query.",
+				"The weather station identifier to query. Search for station ID's at " +
+				"http://www.wunderground.com/weatherstation/index.asp",
 				null, true)]
-		public string StationID {
+		public string StationIDSetting {
 			set {
 				m_station_id = value;
 			}
@@ -136,7 +145,7 @@ namespace ElveWUnderground {
 		[DriverSettingAttribute("Units",
 				"Use English or Metric units.",
 				new string[] { "English", "Metric" }, "English", true)]
-		public string Units {
+		public string UnitsSetting {
 			set {
 				if (value == "Metric") {
 					m_metric = true;
@@ -147,9 +156,10 @@ namespace ElveWUnderground {
 		}
 
 		[DriverSettingAttribute("Polling Interval",
-				"The polling interval in seconds.",
+				"The interval used to query current condition information from " +
+				"the Weather Underground server, in seconds.",
 				1, 3600, "300", true)]
-		public int PollInterval {
+		public int PollIntervalSetting {
 			set {
 				m_device_poll = value;
 			}
@@ -175,11 +185,12 @@ namespace ElveWUnderground {
 			m_weather = new WeatherData(m_metric);
 			
 			// Attempt connection to the Weather Underground server and pull current values
-			ReadWeatherData(m_station_id);
-			ApparentTemp();
+			if (ReadWeatherData(m_station_id)) {
+				ApparentTemp();
+			}
 
 			// This should only be called twice a day.
-			WeatherForecast(m_weather.ForecastLoc);
+			ReadWeatherForecast(m_weather.ForecastLoc);
 
 			// Start a timer to pull data at polling frequency.
 			m_poll_timer = new System.Timers.Timer();
@@ -212,7 +223,14 @@ namespace ElveWUnderground {
 		// ----------------------------------------------------------------
 		//
 
-        [ScriptObjectPropertyAttribute("Location", "Gets the location for the weather.", "the {NAME} weather location", null)]
+		//
+		// The following properties represent the current weather conditions. For
+		// the most part, they get updated at the polling interval.  See
+		// ReadWeatherData() for the URL that is used and XML parsing of the returned
+		// data.
+		//
+        [ScriptObjectPropertyAttribute("Location", "Gets the location for the weather.",
+			"the {NAME} weather location", null)]
         public ScriptString Location {
             get {
                 // return text description of the weather location, such as city, state, etc.
@@ -220,7 +238,8 @@ namespace ElveWUnderground {
             }
         }
 
-        [ScriptObjectPropertyAttribute("Temperature", "Gets the temperature.", "the {NAME} temperature", null)]
+        [ScriptObjectPropertyAttribute("Temperature", "Gets the current temperature.",
+			"the {NAME} temperature", null)]
         [SupportsDriverPropertyBinding]
         public ScriptNumber Temperature {
             get {
@@ -228,8 +247,8 @@ namespace ElveWUnderground {
             }
         }
 
-		// TODO: What is this?  Should this be heat index or windchill?
-        [ScriptObjectPropertyAttribute("Apparent Temperature", "Gets the apparent temperature.", "the {NAME} apparent temperature", null)]
+        [ScriptObjectPropertyAttribute("Apparent Temperature", "Gets the apparent temperature.",
+			"the {NAME} apparent temperature", null)]
         [SupportsDriverPropertyBinding]
         public ScriptNumber ApparentTemperature {
             get {
@@ -237,9 +256,8 @@ namespace ElveWUnderground {
             }
         }
 
-		// TODO: What goes here?  WUnderground doesn't seem to report this.  Could take from the forecast, but that won't be
-		//       "current".
-        [ScriptObjectPropertyAttribute("Current Condition", "Gets the current condition.", "the {NAME} current condition text", null)]
+        [ScriptObjectPropertyAttribute("Current Condition", "Gets the current condition.",
+			"the {NAME} current condition text", null)]
         [SupportsDriverPropertyBinding]
         public ScriptString CurrentCondition {
             get {
@@ -247,7 +265,8 @@ namespace ElveWUnderground {
             }
         }
 
-        [ScriptObjectPropertyAttribute("Wind Speed", "Gets the windspeed in miles/hour.", "the {NAME} windspeed in miles/hour", null)]
+        [ScriptObjectPropertyAttribute("Wind Speed", "Gets the windspeed in miles/hour.",
+			"the {NAME} windspeed in miles/hour", null)]
         [SupportsDriverPropertyBinding]
         public ScriptNumber WindSpeed {
             get {
@@ -255,7 +274,8 @@ namespace ElveWUnderground {
             }
         }
 
-        [ScriptObjectPropertyAttribute("Wind Gust Speed", "Gets the gust windspeed in miles/hour.", "the {NAME} gust windspeed in miles/hour", null)]
+        [ScriptObjectPropertyAttribute("Wind Gust Speed", "Gets the gust windspeed in miles/hour.",
+			"the {NAME} gust windspeed in miles/hour", null)]
         [SupportsDriverPropertyBinding]
         public ScriptNumber WindGustSpeed {
             get {
@@ -263,7 +283,8 @@ namespace ElveWUnderground {
             }
         }
 
-        [ScriptObjectPropertyAttribute("Wind Direction Degrees", "Gets the wind direction in degrees.", "the {NAME} wind direction in degrees", null)]
+        [ScriptObjectPropertyAttribute("Wind Direction Degrees", "Gets the wind direction in degrees.",
+			"the {NAME} wind direction in degrees", null)]
         [SupportsDriverPropertyBinding]
         public ScriptNumber WindDirectionDegrees {
             get {
@@ -271,7 +292,8 @@ namespace ElveWUnderground {
             }
         }
 
-        [ScriptObjectPropertyAttribute("Wind Direction Text", "Gets the wind direction as text. Ex: NW or E.", "the {NAME} wind direction abbreviation", null)]
+        [ScriptObjectPropertyAttribute("Wind Direction Text", "Gets the wind direction as text. Ex: NW or E.",
+			"the {NAME} wind direction abbreviation", null)]
         [SupportsDriverPropertyBinding]
         public ScriptString WindDirectionText {
             get {
@@ -279,7 +301,8 @@ namespace ElveWUnderground {
             }
         }
 
-        [ScriptObjectPropertyAttribute("Humidity", "Gets the percent relative humidity.", "the {NAME} percent relative humidity", null)]
+        [ScriptObjectPropertyAttribute("Humidity", "Gets the percent relative humidity.",
+			"the {NAME} percent relative humidity", null)]
         [SupportsDriverPropertyBinding]
         public ScriptNumber Humidity {
             get {
@@ -288,7 +311,8 @@ namespace ElveWUnderground {
         }
 
 
-        [ScriptObjectPropertyAttribute("Dew Point", "Gets the dew point temperature.", "the {NAME} dewpoint temperature", null)]
+        [ScriptObjectPropertyAttribute("Dew Point", "Gets the dew point temperature.",
+			"the {NAME} dewpoint temperature", null)]
         [SupportsDriverPropertyBinding]
         public ScriptNumber DewPoint {
             get {
@@ -296,309 +320,12 @@ namespace ElveWUnderground {
             }
         }
 
-
-		// Forecast data
-
-        [ScriptObjectPropertyAttribute("Highs", "Gets an array of daily maximum temperatures.", "the {NAME} maximum temperature for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray Highs {
-            get {
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptNumber(m_forecasts[i].GetHigh()));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Lows", "Gets an array of daily minimum temperatures.", "the {NAME} minimum temperature for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray Lows {
-            get {
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptNumber(m_forecasts[i].GetLow()));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Conditions", "Gets the weather conditions for all days (Same as DayDescriptions Property).")]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray Conditions {
-            get {
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].Condition));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Precipitation Chance", "Gets the percent precipitation chance.", "the percent precipitation chance", null)]
-        [SupportsDriverPropertyBinding]
-        public ScriptNumber PrecipitationChance {
-            get {
-				return new ScriptNumber(-999);
-            }
-        }
-
-
-        [ScriptObjectPropertyAttribute("Dates", "Gets the dates for all the forecast days.", "the {NAME} date for forecast day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray Dates {
-            get {
-                // return an array of ScriptDateTime elements for the dates, 0 based.
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].Date));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Week Days", "Gets the day names for all the forecast days.", "the {NAME} date for forecast day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray WeekDayTexts {
-            get {
-                // return an array of ScriptDateTime elements for the dates, 0 based.
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].Day));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Day Icon", "Gets an array of condition icons id by day.", "the {NAME} condition icon id for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray DayIconIDs {
-            get {
-                // return a 0 based array of condition icon urls
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(IconID(m_forecasts[i].Icon).ToString()));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Night Icon", "Gets an array of condition icons id by day.", "the {NAME} condition icon id for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray NightIconIDs {
-            get {
-                // return a 0 based array of condition icon urls
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					if (m_forecasts[i].NightIcon.StartsWith("nt_")) {
-						array.Add(new ScriptString(IconID(m_forecasts[i].NightIcon).ToString()));
-					} else {
-						array.Add(new ScriptString(IconID("nt_" + m_forecasts[i].NightIcon).ToString()));
-					}
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Condition Icon Urls", "Gets an array of condition icons urls by day.", "the {NAME} condition icon url for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray ConditionIconUrls {
-            get {
-                // return a 0 based array of condition icon urls
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].IconURL));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Smiley Condition Icon Urls", "Gets an array of condition icons urls by day.", "the {NAME} condition icon url for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray SmileyConditionIconUrls {
-            get {
-                // return a 0 based array of condition icon urls
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].IconURLSmiley));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Generic Condition Icon Urls", "Gets an array of condition icons urls by day.", "the {NAME} condition icon url for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray GenericConditionIconUrls {
-            get {
-                // return a 0 based array of condition icon urls
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].IconURLGeneric));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Old School Condition Icon Urls", "Gets an array of condition icons urls by day.", "the {NAME} condition icon url for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray OldSchoolConditionIconUrls {
-            get {
-                // return a 0 based array of condition icon urls
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].IconURLOldSchool));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Cartoon Condition Icon Urls", "Gets an array of condition icons urls by day.", "the {NAME} condition icon url for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray CartoonConditionIconUrls {
-            get {
-                // return a 0 based array of condition icon urls
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].IconURLCartoon));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Mobile Condition Icon Urls", "Gets an array of condition icons urls by day.", "the {NAME} condition icon url for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray MobileConditionIconUrls {
-            get {
-                // return a 0 based array of condition icon urls
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].IconURLMobile));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Simple Condition Icon Urls", "Gets an array of condition icons urls by day.", "the {NAME} condition icon url for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray SimpleConditionIconUrls {
-            get {
-                // return a 0 based array of condition icon urls
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].IconURLSimple));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Contemporary Condition Icon Urls", "Gets an array of condition icons urls by day.", "the {NAME} condition icon url for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray ContemporaryConditionIconUrls {
-            get {
-                // return a 0 based array of condition icon urls
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].IconURLContemporary));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Helen Condition Icon Urls", "Gets an array of condition icons urls by day.", "the {NAME} condition icon url for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray HelenConditionIconUrls {
-            get {
-                // return a 0 based array of condition icon urls
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].IconURLHelen));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Incredible Condition Icon Urls", "Gets an array of condition icons urls by day.", "the {NAME} condition icon url for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray IncredibleConditionIconUrls {
-            get {
-                // return a 0 based array of condition icon urls
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].IconURLIncredible));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Day Descriptions", "Gets an array of daily forecasts by day.", "the {NAME} forecast text day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray DayDescriptions {
-            get {
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].DayForecastText));
-				}
-				return array;
-            }
-        }
-
-        [ScriptObjectPropertyAttribute("Night Descriptions", "Gets an array of nightly forecasts by day.", "the {NAME} forecast text day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
-        public IScriptArray NightDescriptions {
-            get {
-				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
-				for (int i = 0; i < m_forecasts.Length; i++) {
-					array.Add(new ScriptString(m_forecasts[i].NightForecastText));
-				}
-				return array;
-            }
-        }
-
-
-
-		// Properties not required by weather interface
-
-		[ScriptObjectPropertyAttribute("Credit", "Provide credit for using Weather Underground data feeds.",
-			"the {NAME} data feed credit", null)]
-		[SupportsDriverPropertyBinding]
-		public ScriptString Credit {
-			get {
-				return new ScriptString("Data source provided by " + m_weather.Credit);
-			}
-		}
-		[ScriptObjectPropertyAttribute("Credit URL", "Provide a link to the Weather Underground site.",
-			"the {NAME} URL", null)]
-		[SupportsDriverPropertyBinding]
-		public ScriptString CreditURL {
-			get {
-				return new ScriptString(m_weather.CreditURL);
-			}
-		}
-
-		[ScriptObjectPropertyAttribute("Last Update", "Date and Time that last update was recieved.",
-			"the {NAME} data feed observation time", null)]
-		[SupportsDriverPropertyBinding]
-		public ScriptString LastUpdate {
-			get {
-				return new ScriptString(m_weather.LastUpdate);
-			}
-		}
-
-		[ScriptObjectPropertyAttribute("Last Forecast Update", "Date and Time that last update was recieved.",
-			"the {NAME} data feed observation time", null)]
-		[SupportsDriverPropertyBinding]
-		public ScriptString LastForecastUpdate {
-			get {
-				return new ScriptString(m_forecasts[0].LastUpdate);
-			}
-		}
-
         [ScriptObjectPropertyAttribute("Barometric Pressure", "Gets the barometric pressure.",
 			"the {NAME} barometric pressure", null)]
         [SupportsDriverPropertyBinding]
         public ScriptNumber BarometricPressure {
             get {
-				return new ScriptNumber(m_weather.GetPressure());
+				return new ScriptNumber(m_weather.GetPressure);
             }
         }
 
@@ -608,6 +335,15 @@ namespace ElveWUnderground {
 		public ScriptString BarometricTrend {
 			get {
 				return new ScriptString(m_weather.PressureTrend);
+			}
+		}
+
+		[ScriptObjectPropertyAttribute("Barometric Pressure Units", "Gets the barometric pressure units of measure.",
+			"the {NAME} barometric pressure units of measure", null)]
+		[SupportsDriverPropertyBinding]
+		public ScriptString BarometricUnits {
+			get {
+				return new ScriptString(m_weather.PressureUnits);
 			}
 		}
 
@@ -656,6 +392,262 @@ namespace ElveWUnderground {
             }
         }
 
+		[ScriptObjectPropertyAttribute("Credit", "Provide credit for using Weather Underground data feeds.",
+			"the {NAME} data feed credit", null)]
+		[SupportsDriverPropertyBinding]
+		public ScriptString Credit {
+			get {
+				return new ScriptString("Data source provided by " + m_weather.Credit);
+			}
+		}
+		[ScriptObjectPropertyAttribute("Credit URL", "Provide a link to the Weather Underground site.",
+			"the {NAME} URL", null)]
+		[SupportsDriverPropertyBinding]
+		public ScriptString CreditURL {
+			get {
+				return new ScriptString(m_weather.CreditURL);
+			}
+		}
+
+		[ScriptObjectPropertyAttribute("Last Update", "Date and Time that last update was recieved.",
+			"the {NAME} data feed observation time", null)]
+		[SupportsDriverPropertyBinding]
+		public ScriptString LastUpdate {
+			get {
+				return new ScriptString(m_weather.LastUpdate);
+			}
+		}
+
+		//
+		// The following properties represent Forecasted weather data. This data will get
+		// updated hourly.  See ReadWeatherForecast() for the URL and XML parsing.
+		//
+		// Weather Underground provides 6 days worth of forecast data. Day 0 is the 
+		// current day.
+		// 
+
+        [ScriptObjectPropertyAttribute("Highs", "Gets an array of daily maximum temperatures.",
+			"the {NAME} maximum temperature for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray Highs {
+            get {
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.GetHigh()), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Lows", "Gets an array of daily minimum temperatures.",
+			"the {NAME} minimum temperature for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray Lows {
+            get {
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.GetLow()), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Conditions", "Gets an array of daily weather conditions.",
+			"the {NAME} weather condition for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray Conditions {
+            get {
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.Condition), 0);
+            }
+        }
+
+		// Weather Underground doesn't support this, but it is a required property.
+        [ScriptObjectPropertyAttribute("Precipitation Chance", "Gets the percent precipitation chance.",
+			"the percent precipitation chance", null)]
+        [SupportsDriverPropertyBinding]
+        public ScriptNumber PrecipitationChance {
+            get {
+				throw new NotSupportedException();
+            }
+        }
+
+
+        [ScriptObjectPropertyAttribute("Dates", "Gets the dates for all the forecast days.",
+			"the {NAME} date for forecast day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray Dates {
+            get {
+                // return an array of ScriptDateTime elements for the dates, 0 based.
+				ScriptArrayMarshalByValue array = new ScriptArrayMarshalByValue();
+				for (int i = 0; i < m_forecasts.Length; i++) {
+					array.Add(new ScriptDateTime(
+						new ScriptNumber(m_forecasts[i].Year),
+						new ScriptNumber(m_forecasts[i].Month),
+						new ScriptNumber(m_forecasts[i].Day)));
+				}
+				return array;
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Dates Text", "Gets the dates for all the forecast days as a text string.",
+			"the {NAME} date for forecast day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray DatesText {
+            get {
+                // return an array of ScriptString elements for the dates, 0 based.
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.DateText), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Week Days", "Gets the day names for all the forecast days.",
+			"the {NAME} day of week for forecast day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray WeekDayTexts {
+            get {
+                // return an array of ScriptString elements for the week day name, 0 based.
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.WeekDay), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Day Icon", "Gets an array of condition icons id by day.",
+			"the {NAME} condition icon id for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray DayIconIDs {
+            get {
+                // return a 0 based array of day icon ids
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => IconID(f.Icon).ToString()), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Night Icon", "Gets an array of night time condition icons id by day.",
+			"the {NAME} night time condition icon id for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray NightIconIDs {
+            get {
+                // return a 0 based array of night icon ids
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => IconID(f.NightIcon).ToString()), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Condition Icon Urls", "Gets an array of condition icons urls by day.",
+			"the {NAME} condition icon url for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray ConditionIconUrls {
+            get {
+                // return a 0 based array of condition icon urls
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.IconURL), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Smiley Condition Icon Urls", "Gets an array of condition icons urls by day.",
+			"the {NAME} condition icon url for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray SmileyConditionIconUrls {
+            get {
+                // return a 0 based array of condition icon urls
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.IconURLSmiley), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Generic Condition Icon Urls", "Gets an array of condition icons urls by day.",
+			"the {NAME} condition icon url for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray GenericConditionIconUrls {
+            get {
+                // return a 0 based array of condition icon urls
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.IconURLGeneric), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Old School Condition Icon Urls", "Gets an array of condition icons urls by day.",
+			"the {NAME} condition icon url for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray OldSchoolConditionIconUrls {
+            get {
+                // return a 0 based array of condition icon urls
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.IconURLOldSchool), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Cartoon Condition Icon Urls", "Gets an array of condition icons urls by day.",
+			"the {NAME} condition icon url for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray CartoonConditionIconUrls {
+            get {
+                // return a 0 based array of condition icon urls
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.IconURLCartoon), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Mobile Condition Icon Urls", "Gets an array of condition icons urls by day.",
+			"the {NAME} condition icon url for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray MobileConditionIconUrls {
+            get {
+                // return a 0 based array of condition icon urls
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.IconURLMobile), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Simple Condition Icon Urls", "Gets an array of condition icons urls by day.",
+			"the {NAME} condition icon url for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray SimpleConditionIconUrls {
+            get {
+                // return a 0 based array of condition icon urls
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.IconURLSimple), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Contemporary Condition Icon Urls", "Gets an array of condition icons urls by day.",
+			"the {NAME} condition icon url for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray ContemporaryConditionIconUrls {
+            get {
+                // return a 0 based array of condition icon urls
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.IconURLContemporary), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Helen Condition Icon Urls", "Gets an array of condition icons urls by day.",
+			"the {NAME} condition icon url for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray HelenConditionIconUrls {
+            get {
+                // return a 0 based array of condition icon urls
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.IconURLHelen), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Incredible Condition Icon Urls", "Gets an array of condition icons urls by day.",
+			"the {NAME} condition icon url for day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray IncredibleConditionIconUrls {
+            get {
+                // return a 0 based array of condition icon urls
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.IconURLIncredible), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Day Descriptions", "Gets an array of daily forecasts by day.",
+			"the {NAME} forecast text day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray DayDescriptions {
+            get {
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.DayForecastText), 0);
+            }
+        }
+
+        [ScriptObjectPropertyAttribute("Night Descriptions", "Gets an array of nightly forecasts by day.",
+			"the {NAME} night forecast text day {INDEX|0}", null)]
+        [SupportsDriverPropertyBinding]
+        public IScriptArray NightDescriptions {
+            get {
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.NightForecastText), 0);
+            }
+        }
+
+		[ScriptObjectPropertyAttribute("Last Forecast Update", "Date and Time that last update was recieved.",
+			"the {NAME} forecast data feed observation time", null)]
+		[SupportsDriverPropertyBinding]
+		public ScriptString LastForecastUpdate {
+			get {
+				return new ScriptString(m_forecasts[0].LastUpdate);
+			}
+		}
+
         [ScriptObjectPropertyAttribute("Sunrise", "Gets the current sunrise time.",
 			"the {NAME} sunrise", null)]
         [SupportsDriverPropertyBinding]
@@ -697,7 +689,7 @@ namespace ElveWUnderground {
 		// Pull data from the Weather Underground web site and parse
 		// the returned XML.
 		//
-		private void ReadWeatherData(string station) {
+		private bool ReadWeatherData(string station) {
 			WeatherData wd = new WeatherData(m_metric);
 			XmlDocument xml = new XmlDocument();
 			string url;
@@ -709,7 +701,12 @@ namespace ElveWUnderground {
 				station;
 
 			// Send the HTTP request and get the XML response.
-			xml.Load(url);
+			try {
+				xml.Load(url);
+			} catch (Exception ex) {
+				Logger.Error("Error " + ex.Message + " while loading " + url);
+				return false;
+			}
 
 			if (xml.InnerText == "") {
 				Logger.Error("Empty XML string.");
@@ -751,7 +748,8 @@ namespace ElveWUnderground {
 						case "wind_mph": m_weather.WindSpeed = DParse(n.InnerText); break;
 						case "wind_gust_mph": m_weather.WindGust = DParse(n.InnerText); break;
 						case "pressure_string": m_weather.PressureString = n.InnerText; break;
-						case "pressure_in": m_weather.Pressure = DParse(n.InnerText); break;
+						case "pressure_in": m_weather.PressureIN = DParse(n.InnerText); break;
+						case "pressure_mb": m_weather.PressureMB = DParse(n.InnerText); break;
 						case "dewpoint_string": m_weather.DewpointString = n.InnerText; break;
 						case "dewpoint_f": m_weather.Dewpoint = DParse(n.InnerText); break;
 						case "dewpoint_c": m_weather.Dewpoint_c = DParse(n.InnerText); break;
@@ -786,14 +784,17 @@ namespace ElveWUnderground {
 
 			} catch (Exception ex) {
 				Logger.Error("XML parsing failed: " + ex.Message);
+				return false;
 			}
+
+			return true;
 		}
 
 
 		//
 		// Query for forecast data.  How often should we do this query?
 		//
-		private void WeatherForecast(string location) {
+		private bool ReadWeatherForecast(string location) {
 			XmlDocument xml = new XmlDocument();
 			XmlNode node;
 			XmlNodeList nl;
@@ -806,7 +807,13 @@ namespace ElveWUnderground {
 
 			Logger.Debug("Query for forecast using: " + url);
 
-			xml.Load(url);
+			try {
+				xml.Load(url);
+			} catch (Exception ex) {
+				Logger.Error("Error " + ex.Message + " while loading " + url);
+				return false;
+			}
+
 
 			// Parse forecast XML
 			try {
@@ -839,12 +846,16 @@ namespace ElveWUnderground {
 
 								// Date
 								try {
-									m_forecasts[period - 1].Date =
+									m_forecasts[period - 1].DateText =
 										f.SelectNodes(".//date/monthname")[0].InnerText + " " +
 										f.SelectNodes(".//date/day")[0].InnerText + ", " +
 										f.SelectNodes(".//date/year")[0].InnerText;
 
-									m_forecasts[period - 1].Day = f.SelectNodes(".//date/weekday")[0].InnerText;
+									m_forecasts[period - 1].Year = int.Parse(f.SelectNodes(".//date/year")[0].InnerText);
+									m_forecasts[period - 1].Month = int.Parse(f.SelectNodes(".//date/month")[0].InnerText);
+									m_forecasts[period - 1].Day = int.Parse(f.SelectNodes(".//date/day")[0].InnerText);
+									
+									m_forecasts[period - 1].WeekDay = f.SelectNodes(".//date/weekday")[0].InnerText;
 								} catch (Exception ex) {
 									Logger.Error("Failed to parse date:" + ex.Message);
 								}
@@ -982,6 +993,7 @@ namespace ElveWUnderground {
 			}
 
 			Logger.Debug("Finished parsing forecast data.");
+			return true;
 		}
 
 
@@ -992,29 +1004,32 @@ namespace ElveWUnderground {
 		//
 		private void PollWUnderground(Object sender, EventArgs e) {
 
-			ReadWeatherData(m_station_id);
-			ApparentTemp();
-			
-			DevicePropertyChangeNotification("BarometricPressure");
-			DevicePropertyChangeNotification("BarometricTrend");
-			DevicePropertyChangeNotification("BarometricUnits");
-			DevicePropertyChangeNotification("Credit");
-			DevicePropertyChangeNotification("CreditURL");
-			DevicePropertyChangeNotification("DewPoint");
-			DevicePropertyChangeNotification("HeatIndex");
-			DevicePropertyChangeNotification("Humidity");
-			DevicePropertyChangeNotification("Location");
-			DevicePropertyChangeNotification("Precipiation");
-			DevicePropertyChangeNotification("SolarRadiation");
-			DevicePropertyChangeNotification("Temperature");
-			DevicePropertyChangeNotification("UVIndex");
-			DevicePropertyChangeNotification("WindDirectionDegrees");
-			DevicePropertyChangeNotification("WindDirectionText");
-			DevicePropertyChangeNotification("WindGustSpeed");
-			DevicePropertyChangeNotification("WindSpeed");
-			DevicePropertyChangeNotification("Windchill");
-			DevicePropertyChangeNotification("ApparentTemperature");
-			DevicePropertyChangeNotification("LastUpdate");
+			if (ReadWeatherData(m_station_id)) {
+				ApparentTemp();
+
+				DevicePropertyChangeNotification("BarometricPressure", m_weather.GetPressure);
+				DevicePropertyChangeNotification("BarometricTrend", m_weather.PressureTrend);
+				DevicePropertyChangeNotification("BarometricUnits", m_weather.PressureUnits);
+				DevicePropertyChangeNotification("Credit", m_weather.Credit);
+				DevicePropertyChangeNotification("CreditURL", m_weather.CreditURL);
+				DevicePropertyChangeNotification("DewPoint", m_weather.GetDewpoint());
+				DevicePropertyChangeNotification("HeatIndex", m_weather.GetHeatIndex());
+				DevicePropertyChangeNotification("Humidity", m_weather.Humidity);
+				DevicePropertyChangeNotification("LastUpdate", m_weather.LastUpdate);
+				DevicePropertyChangeNotification("Location", m_weather.Location);
+				DevicePropertyChangeNotification("Precipiation", m_weather.GetPrecipitation());
+				DevicePropertyChangeNotification("SolarRadiation", m_weather.SolarRadiation);
+				DevicePropertyChangeNotification("Sunset", m_weather.Sunset);
+				DevicePropertyChangeNotification("Sunrise", m_weather.Sunrise);
+				DevicePropertyChangeNotification("Temperature", m_weather.GetTemperature());
+				DevicePropertyChangeNotification("UVIndex", m_weather.UV);
+				DevicePropertyChangeNotification("WindDirectionDegrees", m_weather.WindDegrees);
+				DevicePropertyChangeNotification("WindDirectionText", m_weather.WindDirection);
+				DevicePropertyChangeNotification("WindGustSpeed", m_weather.WindGust);
+				DevicePropertyChangeNotification("WindSpeed", m_weather.WindSpeed);
+				DevicePropertyChangeNotification("Windchill", m_weather.GetWindChill());
+				DevicePropertyChangeNotification("ApparentTemperature", m_weather.GetApparentTemperature());
+			}
 		}
 
 		//
@@ -1025,25 +1040,35 @@ namespace ElveWUnderground {
 
 			Logger.Debug("Retrieve Forecast data.");
 
-			WeatherForecast(m_weather.ForecastLoc);
+			if (ReadWeatherForecast(m_weather.ForecastLoc)) {
 
-			DevicePropertyChangeNotification("Dates");
-			DevicePropertyChangeNotification("Days");
-			DevicePropertyChangeNotification("Highs");
-			DevicePropertyChangeNotification("Lows");
-			DevicePropertyChangeNotification("Conditions");
-			DevicePropertyChangeNotification("DayDescriptions");
-			DevicePropertyChangeNotification("NightDescriptions");
-			DevicePropertyChangeNotification("ConditionIconURLs");
-			DevicePropertyChangeNotification("SmileyConditionIconURLs");
-			DevicePropertyChangeNotification("GenericConditionIconURLs");
-			DevicePropertyChangeNotification("OldSchoolConditionIconURLs");
-			DevicePropertyChangeNotification("CartoonConditionIconURLs");
-			DevicePropertyChangeNotification("MobileConditionIconURLs");
-			DevicePropertyChangeNotification("SimpleConditionIconURLs");
-			DevicePropertyChangeNotification("ContemporaryConditionIconURLs");
-			DevicePropertyChangeNotification("HelenConditionIconURLs");
-			DevicePropertyChangeNotification("IncredibleConditionIconURLs");
+				for (int i = 0; i < m_forecasts.Length; i++) {
+					DevicePropertyChangeNotification("Highs", m_forecasts[i].GetHigh());
+					DevicePropertyChangeNotification("Lows", m_forecasts[i].GetLow());
+					DevicePropertyChangeNotification("Conditions", m_forecasts[i].Condition);
+					DevicePropertyChangeNotification("Dates",
+						new DateTime(m_forecasts[i].Year, m_forecasts[i].Month, m_forecasts[i].Day));
+					DevicePropertyChangeNotification("DatesText", m_forecasts[i].DateText);
+					DevicePropertyChangeNotification("WeekDayTexts", m_forecasts[i].WeekDay);
+					DevicePropertyChangeNotification("DayIconIDs", IconID(m_forecasts[i].Icon));
+					DevicePropertyChangeNotification("NightIconIDs", IconID(m_forecasts[i].NightIcon));
+					DevicePropertyChangeNotification("ConditionIconURLs", m_forecasts[i].IconURL);
+					DevicePropertyChangeNotification("SmileyConditionIconURLs", m_forecasts[i].IconURLSmiley);
+					DevicePropertyChangeNotification("GenericConditionIconURLs", m_forecasts[i].IconURLGeneric);
+					DevicePropertyChangeNotification("OldSchoolConditionIconURLs", m_forecasts[i].IconURLOldSchool);
+					DevicePropertyChangeNotification("CartoonConditionIconURLs", m_forecasts[i].IconURLCartoon);
+					DevicePropertyChangeNotification("MobileConditionIconURLs", m_forecasts[i].IconURLMobile);
+					DevicePropertyChangeNotification("SimpleConditionIconURLs", m_forecasts[i].IconURLSimple);
+					DevicePropertyChangeNotification("ContemporaryConditionIconURLs", m_forecasts[i].IconURLContemporary);
+					DevicePropertyChangeNotification("HelenConditionIconURLs", m_forecasts[i].IconURLHelen);
+					DevicePropertyChangeNotification("IncredibleConditionIconURLs", m_forecasts[i].IconURLIncredible);
+					DevicePropertyChangeNotification("DayDescriptions", m_forecasts[i].DayForecastText);
+					DevicePropertyChangeNotification("NightDescriptions", m_forecasts[i].NightForecastText);
+				}
+
+				// Not an array
+				DevicePropertyChangeNotification("LastForecastUpdate", m_forecasts[0].LastUpdate);
+			}
 		}
 
 		//
@@ -1146,7 +1171,6 @@ namespace ElveWUnderground {
 		internal double WindGust {get; set;}
 		internal string WindDirection {get; set;}
 		internal int WindDegrees {get; set;}
-		internal double Pressure_mb {get; set;}
 		internal double Dewpoint {get; set;}
 		internal double Dewpoint_c {get; set;}
 		internal double Precipitation {get; set;}
@@ -1171,8 +1195,10 @@ namespace ElveWUnderground {
 		internal string Sunrise { get; set; }
 		internal double ApparentTemp_f { get; set; }
 		internal double ApparentTemp_c { get; set; }
-		internal double m_pressure;
-		internal double m_old_pressure;
+		internal double m_pressure_in;
+		internal double m_pressure_mb;
+		internal double m_old_pressure_in;
+		internal double m_old_pressure_mb;
 		internal string Weather { get; set; }
 		internal string StationID { get; set; }
 		internal string StationType { get; set; }
@@ -1180,34 +1206,75 @@ namespace ElveWUnderground {
 		internal WeatherData(bool units) {
 			// Initialize data structure
 			metric = units;
-			m_pressure = 0;
-			m_old_pressure = 0;
+			m_pressure_in = 0;
+			m_pressure_mb = 0;
+			m_old_pressure_in = 0;
+			m_old_pressure_mb = 0;
 		}
 
-		internal double Pressure {
+		internal double GetPressure {
 			get {
-				return m_pressure;
-			}
-			set {
-				m_old_pressure = m_pressure;
-				m_pressure = value;
+				if (metric) {
+					return m_pressure_mb;
+				} else {
+					return m_pressure_in;
+				}
 			}
 		}
+
+		internal double PressureMB {
+			set {
+				m_old_pressure_mb = m_pressure_mb;
+				m_pressure_mb = value;
+			}
+		}
+
+		internal double PressureIN {
+			set {
+				m_old_pressure_in = m_pressure_in;
+				m_pressure_in = value;
+			}
+		}
+
 
 		internal string PressureTrend {
 			get {
 				// TODO: This should check multiple pressure readings, not just the last
 				// one. There should be an array of readings.
-				if (m_old_pressure > 0) {
-					if (m_old_pressure < m_pressure) {
-						return "raising";
-					} else if (m_old_pressure > m_pressure) {
-						return "falling";
+				if (metric) {
+					if (m_old_pressure_mb > 0) {
+						if (m_old_pressure_mb < m_pressure_mb) {
+							return "raising";
+						} else if (m_old_pressure_mb > m_pressure_mb) {
+							return "falling";
+						} else {
+							return "steady";
+						}
 					} else {
-						return "steady";
+						return "N/A";
 					}
 				} else {
-					return "N/A";
+					if (m_old_pressure_in > 0) {
+						if (m_old_pressure_in < m_pressure_in) {
+							return "raising";
+						} else if (m_old_pressure_in > m_pressure_in) {
+							return "falling";
+						} else {
+							return "steady";
+						}
+					} else {
+						return "N/A";
+					}
+				}
+			}
+		}
+
+		internal string PressureUnits {
+			get {
+				if (metric) {
+					return "Millibars";
+				} else {
+					return "Inches";
 				}
 			}
 		}
@@ -1218,14 +1285,6 @@ namespace ElveWUnderground {
 				return Temperature_c;
 			} else {
 				return Temperature;
-			}
-		}
-
-		internal double GetPressure() {
-			if (metric) {
-				return Pressure_mb;
-			} else {
-				return Pressure;
 			}
 		}
 
@@ -1271,8 +1330,11 @@ namespace ElveWUnderground {
 	}
 
 	internal class Forecast {
-		internal string Date { get; set; }
-		internal string Day { get; set; }
+		internal string DateText { get; set; }
+		internal string WeekDay { get; set; }
+		internal int Year { get; set; }
+		internal int Month { get; set; }
+		internal int Day { get; set; }
 		internal double High_c { get; set; }
 		internal double High_f { get; set; }
 		internal double Low_c { get; set; }
@@ -1294,18 +1356,21 @@ namespace ElveWUnderground {
 		internal string DayForecastText { get; set; }
 		internal string NightForecastTitle { get; set; }
 		internal string NightForecastText { get; set; }
-		internal string NightIcon { get; set; }
 		internal string LastUpdate {get; set;}
 		private bool metric;
+		private string night_icon;
 
 		internal Forecast(bool use_metric) {
 			metric = use_metric;
-			Date = "";
-			Day = "";
+			DateText = "";
+			WeekDay = "";
+			Year = 0;
+			Month = 0;
+			Day = 0;
 			Condition = "N/A";
 			Icon = "N/A";
 			SkyIcon = "N/A";
-			NightIcon = "N/A";
+			night_icon = "N/A";
 			High_f = 0.0;
 			High_c = 0.0;
 			Low_f = 0.0;
@@ -1314,6 +1379,19 @@ namespace ElveWUnderground {
 			DayForecastText = "";
 			NightForecastTitle = "";
 			NightForecastText = "";
+		}
+
+		internal string NightIcon {
+			get {
+				return night_icon;
+			}
+			set {
+				if (value.StartsWith("nt_")) {
+					night_icon = value;
+				} else {
+					night_icon = "nt_" + value;
+				}
+			}
 		}
 
 		internal double GetHigh() {
