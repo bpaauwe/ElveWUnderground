@@ -67,7 +67,7 @@
 //	DayDescriptions         Array of daily forecast text
 //	NightDescriptions       Array of nightly forecast text
 //	NightConditions         Array of nightly short condition text
-//  PrecipitationChanceDay  Array of daily chance of precipitation 
+//  DayPrecipitations       Array of daily chance of precipitation 
 //	ConditionIconUrls       Array of URL's pointing to the condition icon
 //  ---  URL's to the various icon sets supported by Weather Underground
 //  SmileyConditionIconUrls
@@ -115,21 +115,30 @@ namespace ElveWUnderground {
 			DriverCommunicationPort.Network,
 			DriverMultipleInstances.MultiplePerDriverService,
 			1, // Major version
-			1, // Minor version
+			6, // Minor version
 			DriverReleaseStages.Production,
 			"Weather Underground, Inc.",
 			"http://www.wunderground.com/",
 			null
 			)]
-	public class WeatherUndergroundDriver : Driver, IWeatherDriver {
+	public class WeatherUndergroundPWSDriver : Driver, IWeatherDriver {
 		private System.Timers.Timer m_poll_timer;
 		private System.Timers.Timer m_fcast_timer;
-		private string m_station_id;
+		private string[] m_station_id = new string[3];
 		private string m_station_location = "";
 		private int m_device_poll;
+		private int m_last_station_id = 0;
+		private int m_station_id_cnt = 0;
 		private bool m_metric;
 		private WeatherData m_weather;
 		private Forecast[] m_forecasts = new Forecast[6]; // Currently only 6 days of info.
+
+		// The constructor initializes some variables.
+		public WeatherUndergroundPWSDriver() {
+			m_station_id[0] = "";
+			m_station_id[1] = "";
+			m_station_id[2] = "";
+		}
 
 		//
 		// Driver user configuration settings
@@ -144,7 +153,30 @@ namespace ElveWUnderground {
 				null, true)]
 		public string StationIDSetting {
 			set {
-				m_station_id = value;
+				m_station_id[0] = value;
+				m_station_id_cnt = 1;
+			}
+		}
+
+		[DriverSettingAttribute("Station Identifier 2",
+				"The weather station identifier to query. Search for station ID's at " +
+				"http://www.wunderground.com/weatherstation/index.asp",
+				null, false)]
+		public string Station2IDSetting {
+			set {
+				m_station_id[1] = value;
+				m_station_id_cnt = 2;
+			}
+		}
+
+		[DriverSettingAttribute("Station Identifier 3",
+				"The weather station identifier to query. Search for station ID's at " +
+				"http://www.wunderground.com/weatherstation/index.asp",
+				null, false)]
+		public string Station3IDSetting {
+			set {
+				m_station_id[2] = value;
+				m_station_id_cnt = 3;
 			}
 		}
 
@@ -194,6 +226,13 @@ namespace ElveWUnderground {
 				System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString() +
 				" starting.");
 
+			// TODO:
+			// Check the entered station id's to see how many are configured.  Build
+			// a list of station id's and use this list in the polling function.
+			Logger.Info("Station 1 -> " + m_station_id[0]);
+			Logger.Info("Station 2 -> " + m_station_id[1]);
+			Logger.Info("Station 3 -> " + m_station_id[2]);
+
 			// Allocate data classes
 			for (int i = 0; i < m_forecasts.Length; i++) {
 				m_forecasts[i] = new Forecast(m_metric);
@@ -201,14 +240,12 @@ namespace ElveWUnderground {
 			m_weather = new WeatherData(m_metric);
 			
 			// Attempt connection to the Weather Underground server and pull current values
-			if (ReadWeatherData(m_station_id)) {
-				ApparentTemp();
-			}
+			PollWUnderground(this, new EventArgs());
 
-			// This should only be called twice a day.
-			ReadWeatherForecast(m_station_location);
+			// Attempt to connect to the Weather Underground server and pull forecast data
+			PollWUndergroundForecast(this, new EventArgs());
 
-			// Start a timer to pull data at polling frequency.
+			// Start a timer to pull condition data at polling frequency.
 			m_poll_timer = new System.Timers.Timer();
 			m_poll_timer.Elapsed += new ElapsedEventHandler(PollWUnderground);
 			m_poll_timer.Interval = m_device_poll * 1000;
@@ -247,6 +284,7 @@ namespace ElveWUnderground {
 		//
         [ScriptObjectPropertyAttribute("Location", "Gets the location for the weather.",
 			"the {NAME} weather location", null)]
+        [SupportsDriverPropertyBinding]
         public ScriptString Location {
             get {
                 // return text description of the weather location, such as city, state, etc.
@@ -483,7 +521,7 @@ namespace ElveWUnderground {
 		[ScriptObjectPropertyAttribute("Daily Precipitation Chance", "Gets an array of percent precipitation chance.",
 			"the percent precipitation chance for day {INDEX|0}", null)]
 		[SupportsDriverPropertyBinding]
-		public IScriptArray PrecipitationChanceDay {
+		public IScriptArray DayPrecipitations {
 			get {
 				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => f.Pop), 0);
 			}
@@ -527,27 +565,27 @@ namespace ElveWUnderground {
             }
         }
 
-        [ScriptObjectPropertyAttribute("Day Icon", "Gets an array of condition icons id by day.",
-			"the {NAME} condition icon id for day {INDEX|0}", null)]
-        [SupportsDriverPropertyBinding]
+        [ScriptObjectPropertyAttribute("Day Icon IDs", "Gets the day icon ID for all days.", 0, 47,
+			"the {NAME} condition icon id for day {INDEX|0}", "Set {NAME} condition icon id {INDEX|0} to")]
+        [SupportsDriverPropertyBinding("Day Icon Number", "Occurs when the Icon number changes")]
         public IScriptArray DayIconIDs {
             get {
                 // return a 0 based array of day icon ids
-				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => IconID(f.Icon).ToString()), 0);
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => IconID(f.Icon)), 0);
             }
         }
 
-        [ScriptObjectPropertyAttribute("Night Icon", "Gets an array of night time condition icons id by day.",
+        [ScriptObjectPropertyAttribute("Night Icon IDs", "Gets the night icon id for all days.", 0, 47,
 			"the {NAME} night time condition icon id for day {INDEX|0}", null)]
         [SupportsDriverPropertyBinding]
         public IScriptArray NightIconIDs {
             get {
                 // return a 0 based array of night icon ids
-				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => IconID(f.NightIcon).ToString()), 0);
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => IconID(f.NightIcon)), 0);
             }
         }
 
-        [ScriptObjectPropertyAttribute("Condition Icon Urls", "Gets an array of condition icons urls by day.",
+        [ScriptObjectPropertyAttribute("Condition Icon Urls", "Gets the condition icon URLs for all days.",
 			"the {NAME} condition icon url for day {INDEX|0}", null)]
         [SupportsDriverPropertyBinding]
         public IScriptArray ConditionIconUrls {
@@ -713,11 +751,15 @@ namespace ElveWUnderground {
 		// want bad XML contents to break getting the data feed
 		//
 		private double DParse(string str) {
-			try {
-				return double.Parse(str);
-			} catch {
-				return 0.0;
-			}
+            double d = 0.0;
+            double.TryParse(str, out d);
+            return d;
+		}
+
+		private int IParse(string str) {
+            int d = 0;
+            int.TryParse(str, out d);
+            return d;
 		}
 
 		//
@@ -733,15 +775,21 @@ namespace ElveWUnderground {
 
 			Logger.Debug("Read data from web site.");
 
-			if (station.Length > 5) {
-				url = "http://api.wunderground.com/weatherstation/WXCurrentObXML.asp?ID=" +
-					station;
-				pws = true;
-			} else {
-				// This is probably an airport station ID
-				url = "http://api.wunderground.com/auto/wui/geo/WXCurrentObXML/index.xml?query=" +
-					station;
-				pws = false;
+			try {
+				if (station.Length > 5) {
+					url = "http://api.wunderground.com/weatherstation/WXCurrentObXML.asp?ID=" +
+						station;
+					pws = true;
+				} else {
+					// This is probably an airport station ID
+					url = "http://api.wunderground.com/auto/wui/geo/WXCurrentObXML/index.xml?query=" +
+						station;
+					pws = false;
+				}
+			} catch {
+				// If we get here, then the station string is probably undefined.
+				Logger.Error("Undefined station ID");
+				return false;
 			}
 
 			// Send the HTTP request and get the XML response.
@@ -817,10 +865,18 @@ namespace ElveWUnderground {
 						case "temperature_string": m_weather.TemperatureString = n.InnerText; break;
 						case "temp_f": m_weather.Temperature = DParse(n.InnerText); break;
 						case "temp_c": m_weather.Temperature_c = DParse(n.InnerText); break;
-						case "relative_humidity": m_weather.Humidity = DParse(n.InnerText); break;
+						case "relative_humidity":
+							if (pws) {
+								m_weather.Humidity = DParse(n.InnerText);
+							} else {
+								// Airport code data has xx% for humidity. Need to trim
+								// the percent off.
+								m_weather.Humidity = DParse(n.InnerText.TrimEnd('%'));
+							}
+							break;
 						case "wind_string": break;
 						case "wind_dir": m_weather.WindDirection = n.InnerText; break;
-						case "wind_degrees": m_weather.WindDegrees = int.Parse(n.InnerText); break;
+						case "wind_degrees": m_weather.WindDegrees = IParse(n.InnerText); break;
 						case "wind_mph": m_weather.WindSpeed = DParse(n.InnerText); break;
 						case "wind_gust_mph": m_weather.WindGust = DParse(n.InnerText); break;
 						case "pressure_string": m_weather.PressureString = n.InnerText; break;
@@ -851,6 +907,7 @@ namespace ElveWUnderground {
 						case "weather": m_weather.Weather = n.InnerText;  break;
 						case "ob_url":
 							// Forcast data
+							m_weather.ForecastURL = n.InnerText;
 							Logger.Info("  -> ob_url = " + n.InnerText);
 							break;
 						default:
@@ -881,6 +938,13 @@ namespace ElveWUnderground {
 				location;
 
 			Logger.Debug("Query for forecast using: " + url);
+			Logger.Debug(" -- station forecast url: " + m_weather.ForecastURL);
+			Logger.Debug(" -- location = [" + location + "]");
+
+			if ((location == "") || (location == ",")) {
+				Logger.Error("No forecast location specified.");
+				return false;
+			}
 
 			try {
 				xml.Load(url);
@@ -916,7 +980,7 @@ namespace ElveWUnderground {
 
 							try {
 								// Period defines which slot in the forecast array this is for.
-								period = int.Parse(f.SelectNodes(".//period")[0].InnerText);
+								period = IParse(f.SelectNodes(".//period")[0].InnerText);
 								//Logger.Debug("   -> period = " + period.ToString());
 
 								// Date
@@ -926,9 +990,9 @@ namespace ElveWUnderground {
 										f.SelectNodes(".//date/day")[0].InnerText + ", " +
 										f.SelectNodes(".//date/year")[0].InnerText;
 
-									m_forecasts[period - 1].Year = int.Parse(f.SelectNodes(".//date/year")[0].InnerText);
-									m_forecasts[period - 1].Month = int.Parse(f.SelectNodes(".//date/month")[0].InnerText);
-									m_forecasts[period - 1].Day = int.Parse(f.SelectNodes(".//date/day")[0].InnerText);
+									m_forecasts[period - 1].Year = IParse(f.SelectNodes(".//date/year")[0].InnerText);
+									m_forecasts[period - 1].Month = IParse(f.SelectNodes(".//date/month")[0].InnerText);
+									m_forecasts[period - 1].Day = IParse(f.SelectNodes(".//date/day")[0].InnerText);
 									
 									m_forecasts[period - 1].WeekDay = f.SelectNodes(".//date/weekday")[0].InnerText;
 								} catch (Exception ex) {
@@ -992,7 +1056,7 @@ namespace ElveWUnderground {
 
 								// precipitation percent
 								try {
-									m_forecasts[period - 1].Pop = int.Parse(f.SelectNodes(".//pop")[0].InnerText);
+									m_forecasts[period - 1].Pop = IParse(f.SelectNodes(".//pop")[0].InnerText);
 								} catch (Exception ex) {
 									Logger.Error("Failed to parse pop value: " + ex.Message);
 								}
@@ -1095,32 +1159,45 @@ namespace ElveWUnderground {
 		// processing of the data.
 		//
 		private void PollWUnderground(Object sender, EventArgs e) {
+			int stations_tried = 0;
 
-			if (ReadWeatherData(m_station_id)) {
-				ApparentTemp();
+			// How many stations have actually been defined?  Should only
+			// attempt to query defined stations.
 
-				DevicePropertyChangeNotification("BarometricPressure", m_weather.GetPressure);
-				DevicePropertyChangeNotification("BarometricTrend", m_weather.PressureTrend);
-				DevicePropertyChangeNotification("BarometricUnits", m_weather.PressureUnits);
-				DevicePropertyChangeNotification("Credit", m_weather.Credit);
-				DevicePropertyChangeNotification("CreditURL", m_weather.CreditURL);
-				DevicePropertyChangeNotification("DewPoint", m_weather.GetDewpoint());
-				DevicePropertyChangeNotification("HeatIndex", m_weather.GetHeatIndex());
-				DevicePropertyChangeNotification("Humidity", m_weather.Humidity);
-				DevicePropertyChangeNotification("LastUpdate", m_weather.LastUpdate);
-				DevicePropertyChangeNotification("Location", m_weather.Location);
-				DevicePropertyChangeNotification("Precipitation", m_weather.GetPrecipitation());
-				DevicePropertyChangeNotification("SolarRadiation", m_weather.SolarRadiation);
-				DevicePropertyChangeNotification("Sunset", m_weather.Sunset);
-				DevicePropertyChangeNotification("Sunrise", m_weather.Sunrise);
-				DevicePropertyChangeNotification("Temperature", m_weather.GetTemperature());
-				DevicePropertyChangeNotification("UVIndex", m_weather.UV);
-				DevicePropertyChangeNotification("WindDirectionDegrees", m_weather.WindDegrees);
-				DevicePropertyChangeNotification("WindDirectionText", m_weather.WindDirection);
-				DevicePropertyChangeNotification("WindGustSpeed", m_weather.WindGust);
-				DevicePropertyChangeNotification("WindSpeed", m_weather.WindSpeed);
-				DevicePropertyChangeNotification("Windchill", m_weather.GetWindChill());
-				DevicePropertyChangeNotification("ApparentTemperature", m_weather.GetApparentTemperature());
+			while (stations_tried < m_station_id_cnt) {
+				if (ReadWeatherData(m_station_id[m_last_station_id])) {
+					stations_tried = m_station_id_cnt + 1;  // 
+					ApparentTemp();
+
+					DevicePropertyChangeNotification("BarometricPressure", m_weather.GetPressure);
+					DevicePropertyChangeNotification("BarometricTrend", m_weather.PressureTrend);
+					DevicePropertyChangeNotification("BarometricUnits", m_weather.PressureUnits);
+					DevicePropertyChangeNotification("Credit", m_weather.Credit);
+					DevicePropertyChangeNotification("CreditURL", m_weather.CreditURL);
+					DevicePropertyChangeNotification("DewPoint", m_weather.GetDewpoint());
+					DevicePropertyChangeNotification("HeatIndex", m_weather.GetHeatIndex());
+					DevicePropertyChangeNotification("Humidity", m_weather.Humidity);
+					DevicePropertyChangeNotification("LastUpdate", m_weather.LastUpdate);
+					DevicePropertyChangeNotification("Location", m_weather.Location);
+					DevicePropertyChangeNotification("Precipitation", m_weather.GetPrecipitation());
+					DevicePropertyChangeNotification("SolarRadiation", m_weather.SolarRadiation);
+					DevicePropertyChangeNotification("Sunset", m_weather.Sunset);
+					DevicePropertyChangeNotification("Sunrise", m_weather.Sunrise);
+					DevicePropertyChangeNotification("Temperature", m_weather.GetTemperature());
+					DevicePropertyChangeNotification("UVIndex", m_weather.UV);
+					DevicePropertyChangeNotification("WindDirectionDegrees", m_weather.WindDegrees);
+					DevicePropertyChangeNotification("WindDirectionText", m_weather.WindDirection);
+					DevicePropertyChangeNotification("WindGustSpeed", m_weather.WindGust);
+					DevicePropertyChangeNotification("WindSpeed", m_weather.WindSpeed);
+					DevicePropertyChangeNotification("Windchill", m_weather.GetWindChill());
+					DevicePropertyChangeNotification("ApparentTemperature", m_weather.GetApparentTemperature());
+				} else {
+					// Station failed to provide data.  Try another
+					if (++m_last_station_id >= m_station_id_cnt) {
+						m_last_station_id = 0;
+					}
+					stations_tried++;
+				}
 			}
 		}
 
@@ -1135,31 +1212,31 @@ namespace ElveWUnderground {
 			if (ReadWeatherForecast(m_station_location)) {
 
 				for (int i = 0; i < m_forecasts.Length; i++) {
-					DevicePropertyChangeNotification("Highs", m_forecasts[i].GetHigh());
-					DevicePropertyChangeNotification("Lows", m_forecasts[i].GetLow());
-					DevicePropertyChangeNotification("Conditions", m_forecasts[i].Condition);
-					DevicePropertyChangeNotification("Dates",
+					DevicePropertyChangeNotification("Highs", i, m_forecasts[i].GetHigh());
+					DevicePropertyChangeNotification("Lows", i, m_forecasts[i].GetLow());
+					DevicePropertyChangeNotification("Conditions", i, m_forecasts[i].Condition);
+					DevicePropertyChangeNotification("Dates", i,
 						new DateTime(m_forecasts[i].Year, m_forecasts[i].Month, m_forecasts[i].Day));
-					DevicePropertyChangeNotification("DatesText", m_forecasts[i].DateText);
-					DevicePropertyChangeNotification("WeekDayTexts", m_forecasts[i].WeekDay);
-					DevicePropertyChangeNotification("DayIconIDs", IconID(m_forecasts[i].Icon));
-					DevicePropertyChangeNotification("NightIconIDs", IconID(m_forecasts[i].NightIcon));
-					DevicePropertyChangeNotification("ConditionIconUrls", m_forecasts[i].IconURL);
-					DevicePropertyChangeNotification("SmileyConditionIconUrls", m_forecasts[i].IconURLSmiley);
-					DevicePropertyChangeNotification("GenericConditionIconUrls", m_forecasts[i].IconURLGeneric);
-					DevicePropertyChangeNotification("OldSchoolConditionIconUrls", m_forecasts[i].IconURLOldSchool);
-					DevicePropertyChangeNotification("CartoonConditionIconUrls", m_forecasts[i].IconURLCartoon);
-					DevicePropertyChangeNotification("MobileConditionIconUrls", m_forecasts[i].IconURLMobile);
-					DevicePropertyChangeNotification("SimpleConditionIconUrls", m_forecasts[i].IconURLSimple);
-					DevicePropertyChangeNotification("ContemporaryConditionIconUrls", m_forecasts[i].IconURLContemporary);
-					DevicePropertyChangeNotification("HelenConditionIconUrls", m_forecasts[i].IconURLHelen);
-					DevicePropertyChangeNotification("IncredibleConditionIconUrls", m_forecasts[i].IconURLIncredible);
-					DevicePropertyChangeNotification("DayDescriptions", m_forecasts[i].DayForecastText);
-					DevicePropertyChangeNotification("NightDescriptions", m_forecasts[i].NightForecastText);
-					DevicePropertyChangeNotification("PrecipitationChanceDay", m_forecasts[i].Pop);
-					DevicePropertyChangeNotification("NightConditions", m_forecasts[i].NightCondition);
-					DevicePropertyChangeNotification("Sunrise", m_forecasts[i].Sunrise);
-					DevicePropertyChangeNotification("Sunset", m_forecasts[i].Sunset);
+					DevicePropertyChangeNotification("DatesText", i, m_forecasts[i].DateText);
+					DevicePropertyChangeNotification("WeekDayTexts", i, m_forecasts[i].WeekDay);
+					DevicePropertyChangeNotification("DayIconIDs", i, IconID(m_forecasts[i].Icon));
+					DevicePropertyChangeNotification("NightIconIDs", i, IconID(m_forecasts[i].NightIcon));
+					DevicePropertyChangeNotification("ConditionIconUrls", i, m_forecasts[i].IconURL);
+					DevicePropertyChangeNotification("SmileyConditionIconUrls", i, m_forecasts[i].IconURLSmiley);
+					DevicePropertyChangeNotification("GenericConditionIconUrls", i, m_forecasts[i].IconURLGeneric);
+					DevicePropertyChangeNotification("OldSchoolConditionIconUrls", i, m_forecasts[i].IconURLOldSchool);
+					DevicePropertyChangeNotification("CartoonConditionIconUrls", i, m_forecasts[i].IconURLCartoon);
+					DevicePropertyChangeNotification("MobileConditionIconUrls", i, m_forecasts[i].IconURLMobile);
+					DevicePropertyChangeNotification("SimpleConditionIconUrls", i, m_forecasts[i].IconURLSimple);
+					DevicePropertyChangeNotification("ContemporaryConditionIconUrls", i, m_forecasts[i].IconURLContemporary);
+					DevicePropertyChangeNotification("HelenConditionIconUrls", i, m_forecasts[i].IconURLHelen);
+					DevicePropertyChangeNotification("IncredibleConditionIconUrls", i, m_forecasts[i].IconURLIncredible);
+					DevicePropertyChangeNotification("DayDescriptions", i, m_forecasts[i].DayForecastText);
+					DevicePropertyChangeNotification("NightDescriptions", i, m_forecasts[i].NightForecastText);
+					DevicePropertyChangeNotification("DayPrecipitations", i, m_forecasts[i].Pop);
+					DevicePropertyChangeNotification("NightConditions", i, m_forecasts[i].NightCondition);
+					DevicePropertyChangeNotification("Sunrise", i, m_forecasts[i].Sunrise);
+					DevicePropertyChangeNotification("Sunset", i, m_forecasts[i].Sunset);
 				}
 
 				// Not an array
@@ -1222,7 +1299,6 @@ namespace ElveWUnderground {
 				case "chancesleet": return 5;
 				case "chancesnow": return 41;
 				case "chancetstorms": return 17;
-				case "unknown": return 44;
 				case "nt_clear": return 31;
 				case "nt_cloudy": return 26;
 				case "nt_flurries": return 46;
@@ -1237,6 +1313,8 @@ namespace ElveWUnderground {
 				case "nt_snow": return 42;
 				case "nt_sunny": return 31;
 				case "nt_tstorms": return 47;
+                case "N/A":
+                case "unknown":
 				default:
 					Logger.Debug("No IconID match for icon named [" + icon + "]");
 					return 44; // 44 = Unknown
@@ -1319,7 +1397,6 @@ namespace ElveWUnderground {
 		internal double WindChill_c {get; set;}
 		internal double SolarRadiation {get; set;}
 		internal double UV {get; set;}
-		internal Boolean metric {get; set;}
 		internal string TemperatureString {get; set;}
 		internal string PressureString {get; set;}
 		internal string DewpointString {get; set;}
@@ -1340,6 +1417,8 @@ namespace ElveWUnderground {
 		internal string Weather { get; set; }
 		internal string StationID { get; set; }
 		internal string StationType { get; set; }
+		internal string ForecastURL { get; set; }
+		private Boolean metric;
 
 		internal WeatherData(bool units) {
 			// Initialize data structure
@@ -1348,6 +1427,51 @@ namespace ElveWUnderground {
 			m_pressure_mb = 0;
 			m_old_pressure_in = 0;
 			m_old_pressure_mb = 0;
+			ForecastLoc = "";
+			Location = "";
+			LocationElevation = "";
+			LocationNeighborhood = "";
+			LocationCity = "";
+			LocationState = "";
+			LocationZip = "";
+			Latitude = 0.0;
+			Longitude = 0.0;
+			Station = "";
+			LastUpdate = "";
+			Temperature = 0.0;
+			Temperature_c = 0.0;
+			Humidity = 0.0;
+			WindSpeed = 0.0;
+			WindGust = 0.0;
+			WindDirection = "";
+			WindDegrees = 0;
+			Dewpoint = 0.0;
+			Dewpoint_c = 0.0;
+			Precipitation = 0.0;
+			Precipitation_cm = 0.0;
+			HeatIndex_f = 0.0;
+			HeatIndex_c = 0.0;
+			WindChill_f = 0.0;
+			WindChill_c = 0.0;
+			SolarRadiation = 0.0;
+			UV = 0.0;
+			TemperatureString = "";
+			PressureString = "";
+			DewpointString = "";
+			HeatIndexString = "";
+			WindChillString = "";
+			Credit = "";
+			CreditURL = "";
+			MoonAge = "";
+			MoonLight = "";
+			Sunset = "";
+			Sunrise = "";
+			ApparentTemp_f  = 0.0;
+			ApparentTemp_c = 0.0;
+			Weather = "";
+			StationID = "";
+			StationType = "";
+			ForecastURL = "";
 		}
 
 		internal double GetPressure {
@@ -1504,11 +1628,12 @@ namespace ElveWUnderground {
 
 		internal Forecast(bool use_metric) {
 			metric = use_metric;
-			DateText = "";
-			WeekDay = "";
+			DateText = "N/A";
+			WeekDay = "N/A";
 			Year = 0;
 			Month = 0;
 			Day = 0;
+			Pop = 0;
 			Condition = "N/A";
 			Icon = "N/A";
 			SkyIcon = "N/A";
@@ -1517,11 +1642,24 @@ namespace ElveWUnderground {
 			High_c = 0.0;
 			Low_f = 0.0;
 			Low_c = 0.0;
-			DayForecastTitle = "";
-			DayForecastText = "";
-			NightForecastTitle = "";
-			NightForecastText = "";
-			NightCondition = "";
+			IconURL = "N/A";
+			IconURLSmiley = "N/A";
+			IconURLGeneric = "N/A";
+			IconURLOldSchool = "N/A";
+			IconURLCartoon = "N/A";
+			IconURLMobile = "N/A";
+			IconURLSimple = "N/A";
+			IconURLContemporary = "N/A";
+			IconURLHelen = "N/A";
+			IconURLIncredible = "N/A";
+			DayForecastTitle = "N/A";
+			DayForecastText = "N/A";
+			NightForecastTitle = "N/A";
+			NightForecastText = "N/A";
+			NightCondition = "N/A";
+			Sunrise = "N/A";
+			Sunset = "N/A";
+			LastUpdate = "Never";
 		}
 
 		internal string NightIcon {
