@@ -1291,7 +1291,7 @@ namespace ElveWUnderground {
 				case "mostlysunny": return 34;
 				case "rain": return 40;
 				case "sleet": return 5;
-				case "snow": return 41;
+                case "snow": return 42;
 				case "sunny": return 32;
 				case "tstorms": return 17;
 				case "chanceflurries": return 13;
@@ -1736,11 +1736,13 @@ namespace ElveWUnderground {
 			double delta1;
 			double delta2;
 
+			// For some reason, this code thinks that west longitudes should
+			// be positive, not negative. Reverse the sign.
+			longitude *= -1.0;
 
-			tzl = localzone.GetUtcOffset(date).Hours;
-			if (localzone.IsDaylightSavingTime(date)) {
-				tzl -= 1;
-			}
+			// Again, the code seems to think that the timezone offset
+			// is backwards I.E. PST is 8 hrs, not -8 hrs from GMT.
+			tzl = localzone.GetUtcOffset(date).Hours * -1;
 
 			alpha1 = atan_q_deg((Math.Sin(deg2rad(lambda1))) *
 					Math.Cos(deg2rad(23.441884)),
@@ -1756,6 +1758,10 @@ namespace ElveWUnderground {
 			delta2 = asin_deg(Math.Sin(deg2rad(23.441884)) *
 					Math.Sin(deg2rad(lambda2)));
 
+			//Logger.Debug("Right ascension, declination for lon " + lambda1.ToString() + "is " + alpha1.ToString() + ", " + delta1.ToString());
+			//Logger.Debug("Right ascension, declination for lon " + lambda2.ToString() + "is " + alpha2.ToString() + ", " + delta2.ToString());
+
+
 			double st1r = rise(alpha1, delta1, latitude);
 			double st1s = set(alpha1, delta1, latitude);
 			double st2r = rise(alpha2, delta2, latitude);
@@ -1763,24 +1769,33 @@ namespace ElveWUnderground {
 
 			double m1 = adj24(gmst(jd - 0.5, 0.5 + tzl / 24.0) - longitude / 15);
 
+			//Logger.Debug("local sidreal time of midnight is " + m1.ToString() + "  lon = " + longitude.ToString());
+
 			double hsm = adj24(st1r - m1);
+			//Logger.Debug("about " + hsm.ToString() + " hourse from midnight to dawn");
 
 			double ratio = hsm / 24.07;
+			//Logger.Debug(ratio.ToString() + " is how far dawn is into the day");
 
 			if (Math.Abs(st2r - st1r) > 1.0) {
 				st2r += 24.0;
+				//Logger.Debug("st2r corrected from " + (st2r-24.0).ToString() + " to " + st2r.ToString());
 			}
 
 			double trise = adj24((1.0 - ratio) * st1r + ratio * st2r);
 
 			hsm = adj24(st1s - m1);
+			//Logger.Debug("about " + hsm.ToString() + " hours from midnight to sunset");
 			ratio = hsm / 24.07;
+			//Logger.Debug(ratio.ToString() + " is ho far sunset is into the day");
 
 			if (Math.Abs(st2s - st1s) > 1.0) {
 				st2s += 24.0;
+				//Logger.Debug("st2s corrected from " + (st2s-24.0).ToString() + " to " + st2s.ToString());
 			}
 
 			double tset = adj24((1.0 - ratio) * st1s + ratio * st2s);
+			//Logger.Debug("Uncorrected rise = " + trise.ToString() + ", set = " + tset.ToString());
 
 			//$ar = $a1r * 360.0 / (360.0 + $a1r - $a2r);
 			//$as = $a1s * 360.0 / (360.0 + $a1s - $a2s);
@@ -1792,6 +1807,7 @@ namespace ElveWUnderground {
 			double y = asin_deg(sin_deg(x) / sin_deg(tri));
 			// $da = &asin_deg(&tan_deg($x)/&tan_deg($tri));
 			double dt = 240.0 * y / cos_deg(delta) / 3600;
+			//Logger.Debug("Corrections: dt = " + dt.ToString());
 
 			info.Sunrise = date.Date.AddMinutes(
 					lst_to_hm(trise - dt, jd, tzl, longitude, year));
@@ -1871,6 +1887,7 @@ namespace ElveWUnderground {
 			b += (int)(y * 365.25);
 			b += (int)((30.6001 * (m + 1.0)));
 			jd = (double)d + (double)b + 1720994.5;
+			//Logger.Debug("Julian date for " + m.ToString() + "/" + d.ToString() + "/" + y.ToString() + " is " + jd.ToString());
 
 			return jd;
 		}
@@ -1903,6 +1920,7 @@ namespace ElveWUnderground {
 
 			v = 2 * Math.Atan(1.0168601 * Math.Tan(e / 2));
 			v = adj360(((v * 180.0) / Math.PI) + 282.596403);
+			//Logger.Debug("Solar Longitude for " + ed.ToString() + " days is " + v.ToString());
 
 			return v;
 		}
@@ -2104,6 +2122,7 @@ namespace ElveWUnderground {
 				s -= 24.0;
 			}
 
+			//Logger.Debug("For jd = " + j.ToString() + ", f = " + f.ToString() + " , gst = " + s.ToString());
 			return s;
 		}
 
