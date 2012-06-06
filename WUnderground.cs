@@ -121,14 +121,14 @@ namespace WUnderground {
 			DriverCommunicationPort.Network,
 			DriverMultipleInstances.MultiplePerDriverService,
 			1, // Major version
-			0, // Minor version
+			1, // Minor version
 			DriverReleaseStages.Production,
 			"Weather Underground, Inc.",
 			"http://www.wunderground.com/",
 			null
 			)]
 	public class WeatherUndergroundDriver : Driver, IWeatherDriver {
-		private string key = "828d8214821ec271";   // FIXME: replace with setting
+		private string key = "XXXXXXXXXXXXXXXX";  // Set via driver Settings
 		private System.Timers.Timer m_poll_timer;
 		private string m_location;
 		private string m_station_location = "";
@@ -197,6 +197,7 @@ namespace WUnderground {
 				Dictionary<string, byte[]> configFileData) {
 			DirectoryInfo localpath = new DirectoryInfo(LocalDeviceDataDirectoryPath);
 
+			//Logger.Info(DriverDisplayNameInternal + " Driver version " + 
 			Logger.Info("Weather Underground Driver version " +
 				System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString() +
 				" starting.");
@@ -559,27 +560,27 @@ namespace WUnderground {
             }
         }
 
-        [ScriptObjectPropertyAttribute("Day Icon", "Gets an array of condition icons id by day.",
-			"the {NAME} condition icon id for day {INDEX|0}", null)]
+        [ScriptObjectPropertyAttribute("Day Icon IDs", "Gets the day icon ID for all days.", 0, 47,
+			"the {NAME} condition icon id for day {INDEX|0}", "set {NAME} to {INDEX|0}")]
         [SupportsDriverPropertyBinding]
         public IScriptArray DayIconIDs {
             get {
                 // return a 0 based array of day icon ids
-				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => IconID(f.Icon).ToString()), 0);
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => IconID(f.Icon)), 0);
             }
         }
 
-        [ScriptObjectPropertyAttribute("Night Icon", "Gets an array of night time condition icons id by day.",
+        [ScriptObjectPropertyAttribute("Night Icon IDs", "Gets the night icon ID for all days.", 0, 47,
 			"the {NAME} night time condition icon id for day {INDEX|0}", null)]
         [SupportsDriverPropertyBinding]
         public IScriptArray NightIconIDs {
             get {
                 // return a 0 based array of night icon ids
-				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => IconID(f.NightIcon).ToString()), 0);
+				return new ScriptArrayMarshalByValue(m_forecasts.Select(f => IconID(f.NightIcon)), 0);
             }
         }
 
-        [ScriptObjectPropertyAttribute("Condition Icon Urls", "Gets an array of condition icons urls by day.",
+        [ScriptObjectPropertyAttribute("Condition Icon Urls", "Gets the condition icon URLs for all days.",
 			"the {NAME} condition icon url for day {INDEX|0}", null)]
         [SupportsDriverPropertyBinding]
         public IScriptArray ConditionIconUrls {
@@ -839,6 +840,14 @@ namespace WUnderground {
 			}
 		}
 
+		private int IParse(string str) {
+			try {
+				return int.Parse(str);
+			} catch {
+				return 0;
+			}
+		}
+
 		//
 		// Pull data from the Weather Underground web site and parse
 		// the returned XML.
@@ -994,7 +1003,7 @@ namespace WUnderground {
 						case "relative_humidity": m_weather.Humidity = DParse(n.InnerText); break;
 						case "wind_string": break;
 						case "wind_dir": m_weather.WindDirection = n.InnerText; break;
-						case "wind_degrees": m_weather.WindDegrees = int.Parse(n.InnerText); break;
+						case "wind_degrees": m_weather.WindDegrees = IParse(n.InnerText); break;
 						case "wind_mph": m_weather.WindSpeed = DParse(n.InnerText); break;
 						case "wind_gust_mph": m_weather.WindGust = DParse(n.InnerText); break;
 						case "pressure_string": m_weather.PressureString = n.InnerText; break;
@@ -1137,7 +1146,7 @@ namespace WUnderground {
 							f.CreateNavigator();
 
 							// Period defines which slot in the forecast array this is for.
-							period = int.Parse(f.SelectNodes(".//period")[0].InnerText);
+							period = IParse(f.SelectNodes(".//period")[0].InnerText);
 							//Logger.Debug("   -> period = " + period.ToString());
 
 							// Date
@@ -1147,9 +1156,9 @@ namespace WUnderground {
 									f.SelectNodes(".//date/day")[0].InnerText + ", " +
 									f.SelectNodes(".//date/year")[0].InnerText;
 
-								m_forecasts[period - 1].Year = int.Parse(f.SelectNodes(".//date/year")[0].InnerText);
-								m_forecasts[period - 1].Month = int.Parse(f.SelectNodes(".//date/month")[0].InnerText);
-								m_forecasts[period - 1].Day = int.Parse(f.SelectNodes(".//date/day")[0].InnerText);
+								m_forecasts[period - 1].Year = IParse(f.SelectNodes(".//date/year")[0].InnerText);
+								m_forecasts[period - 1].Month = IParse(f.SelectNodes(".//date/month")[0].InnerText);
+								m_forecasts[period - 1].Day = IParse(f.SelectNodes(".//date/day")[0].InnerText);
 
 								m_forecasts[period - 1].WeekDay = f.SelectNodes(".//date/weekday")[0].InnerText;
 								// Other fields available are:
@@ -1221,7 +1230,7 @@ namespace WUnderground {
 
 							// precipitation percent
 							try {
-								m_forecasts[period - 1].Pop = int.Parse(f.SelectNodes(".//pop")[0].InnerText);
+								m_forecasts[period - 1].Pop = IParse(f.SelectNodes(".//pop")[0].InnerText);
 							} catch (Exception ex) {
 								Logger.Error("Failed to parse pop value: " + ex.Message);
 							}
@@ -1363,40 +1372,40 @@ namespace WUnderground {
 
 				// Only update based on number of days we have data for.
 				for (int i = 0; i < m_weather.ForecastDays; i++) {
-					DevicePropertyChangeNotification("Highs", m_forecasts[i].GetHigh());
-					DevicePropertyChangeNotification("Lows", m_forecasts[i].GetLow());
-					DevicePropertyChangeNotification("Conditions", m_forecasts[i].Condition);
-					DevicePropertyChangeNotification("Dates",
+					DevicePropertyChangeNotification("Highs", i, m_forecasts[i].GetHigh());
+					DevicePropertyChangeNotification("Lows", i, m_forecasts[i].GetLow());
+					DevicePropertyChangeNotification("Conditions", i, m_forecasts[i].Condition);
+					DevicePropertyChangeNotification("Dates", i,
 						new DateTime(m_forecasts[i].Year, m_forecasts[i].Month, m_forecasts[i].Day));
-					DevicePropertyChangeNotification("DatesText", m_forecasts[i].DateText);
-					DevicePropertyChangeNotification("WeekDayTexts", m_forecasts[i].WeekDay);
-					DevicePropertyChangeNotification("DayIconIDs", IconID(m_forecasts[i].Icon));
-					DevicePropertyChangeNotification("NightIconIDs", IconID(m_forecasts[i].NightIcon));
-					DevicePropertyChangeNotification("ConditionIconUrls", m_forecasts[i].IconURL);
-					DevicePropertyChangeNotification("SmileyConditionIconUrls", m_forecasts[i].IconURLSmiley);
-					DevicePropertyChangeNotification("GenericConditionIconUrls", m_forecasts[i].IconURLGeneric);
-					DevicePropertyChangeNotification("OldSchoolConditionIconUrls", m_forecasts[i].IconURLOldSchool);
-					DevicePropertyChangeNotification("CartoonConditionIconUrls", m_forecasts[i].IconURLCartoon);
-					DevicePropertyChangeNotification("MobileConditionIconUrls", m_forecasts[i].IconURLMobile);
-					DevicePropertyChangeNotification("SimpleConditionIconUrls", m_forecasts[i].IconURLSimple);
-					DevicePropertyChangeNotification("ContemporaryConditionIconUrls", m_forecasts[i].IconURLContemporary);
-					DevicePropertyChangeNotification("HelenConditionIconUrls", m_forecasts[i].IconURLHelen);
-					DevicePropertyChangeNotification("IncredibleConditionIconUrls", m_forecasts[i].IconURLIncredible);
-					DevicePropertyChangeNotification("DayDescriptions", m_forecasts[i].DayForecastText);
-					DevicePropertyChangeNotification("NightDescriptions", m_forecasts[i].NightForecastText);
-					DevicePropertyChangeNotification("PrecipitationChanceDay", m_forecasts[i].Pop);
-					DevicePropertyChangeNotification("NightConditions", m_forecasts[i].NightCondition);
-					DevicePropertyChangeNotification("WindGustSpeeds", m_forecasts[i].GetWindGust());
-					DevicePropertyChangeNotification("WindGustDirection", m_forecasts[i].WindMaxDirection);
-					DevicePropertyChangeNotification("WindGustDegrees", m_forecasts[i].WindMaxDegrees);
-					DevicePropertyChangeNotification("WindSpeeds", m_forecasts[i].GetWindSpeed());
-					DevicePropertyChangeNotification("WindSpeedDirection", m_forecasts[i].WindAvgDirection);
-					DevicePropertyChangeNotification("WindSpeedDegrees", m_forecasts[i].WindAvgDegrees);
-					DevicePropertyChangeNotification("AverageHumidity", m_forecasts[i].AvgHumidity);
-					DevicePropertyChangeNotification("MinimumHumidity", m_forecasts[i].MinHumidity);
-					DevicePropertyChangeNotification("MaximumHumidity", m_forecasts[i].MaxHumidity);
-					DevicePropertyChangeNotification("Sunrise", m_forecasts[i].Sunrise);
-					DevicePropertyChangeNotification("Sunset", m_forecasts[i].Sunset);
+					DevicePropertyChangeNotification("DatesText", i, m_forecasts[i].DateText);
+					DevicePropertyChangeNotification("WeekDayTexts", i, m_forecasts[i].WeekDay);
+					DevicePropertyChangeNotification("DayIconIDs", i, IconID(m_forecasts[i].Icon));
+					DevicePropertyChangeNotification("NightIconIDs", i, IconID(m_forecasts[i].NightIcon));
+					DevicePropertyChangeNotification("ConditionIconUrls", i, m_forecasts[i].IconURL);
+					DevicePropertyChangeNotification("SmileyConditionIconUrls", i, m_forecasts[i].IconURLSmiley);
+					DevicePropertyChangeNotification("GenericConditionIconUrls", i, m_forecasts[i].IconURLGeneric);
+					DevicePropertyChangeNotification("OldSchoolConditionIconUrls", i, m_forecasts[i].IconURLOldSchool);
+					DevicePropertyChangeNotification("CartoonConditionIconUrls", i, m_forecasts[i].IconURLCartoon);
+					DevicePropertyChangeNotification("MobileConditionIconUrls", i, m_forecasts[i].IconURLMobile);
+					DevicePropertyChangeNotification("SimpleConditionIconUrls", i, m_forecasts[i].IconURLSimple);
+					DevicePropertyChangeNotification("ContemporaryConditionIconUrls", i, m_forecasts[i].IconURLContemporary);
+					DevicePropertyChangeNotification("HelenConditionIconUrls", i, m_forecasts[i].IconURLHelen);
+					DevicePropertyChangeNotification("IncredibleConditionIconUrls", i, m_forecasts[i].IconURLIncredible);
+					DevicePropertyChangeNotification("DayDescriptions", i, m_forecasts[i].DayForecastText);
+					DevicePropertyChangeNotification("NightDescriptions", i, m_forecasts[i].NightForecastText);
+					DevicePropertyChangeNotification("PrecipitationChanceDay", i, m_forecasts[i].Pop);
+					DevicePropertyChangeNotification("NightConditions", i, m_forecasts[i].NightCondition);
+					DevicePropertyChangeNotification("WindGustSpeeds", i, m_forecasts[i].GetWindGust());
+					DevicePropertyChangeNotification("WindGustDirection", i, m_forecasts[i].WindMaxDirection);
+					DevicePropertyChangeNotification("WindGustDegrees", i, m_forecasts[i].WindMaxDegrees);
+					DevicePropertyChangeNotification("WindSpeeds", i, m_forecasts[i].GetWindSpeed());
+					DevicePropertyChangeNotification("WindSpeedDirection", i, m_forecasts[i].WindAvgDirection);
+					DevicePropertyChangeNotification("WindSpeedDegrees", i, m_forecasts[i].WindAvgDegrees);
+					DevicePropertyChangeNotification("AverageHumidity", i, m_forecasts[i].AvgHumidity);
+					DevicePropertyChangeNotification("MinimumHumidity", i, m_forecasts[i].MinHumidity);
+					DevicePropertyChangeNotification("MaximumHumidity", i, m_forecasts[i].MaxHumidity);
+					DevicePropertyChangeNotification("Sunrise", i, m_forecasts[i].Sunrise);
+					DevicePropertyChangeNotification("Sunset", i, m_forecasts[i].Sunset);
 				}
 
 				// Not an array
@@ -1583,7 +1592,6 @@ namespace WUnderground {
 		internal double UV {get; set;}
 		internal double Visibility_mi { get; set; }
 		internal double Visibility_km { get; set; }
-		internal Boolean metric {get; set;}
 		internal string TemperatureString {get; set;}
 		internal string PressureString {get; set;}
 		internal string DewpointString {get; set;}
@@ -1605,6 +1613,7 @@ namespace WUnderground {
 		internal string StationID { get; set; }
 		internal string StationType { get; set; }
 		internal int ForecastDays { get; set; }
+		private Boolean metric;
 
 		internal WeatherData(bool units) {
 			// Initialize data structure
@@ -1894,8 +1903,12 @@ namespace WUnderground {
 	//
 	// Acknowledgements:
 	//   Based on a 'C' program by Robert Bond
-	//   The GST algorithms are from Sky and Telescope, June 1984 by Roger W. Sinnott
-	//   Adapted from algorithms presented in "Pratical Astronomy With Your Calculator" by Peter Duffet-Smith
+	//
+	//   The GST algorithms are from Sky and Telescope, June 1984 by
+	//   Roger W. Sinnott
+	//
+	//   Adapted from algorithms presented in "Pratical Astronomy With Your 
+	//   Calculator" by Peter Duffet-Smith
 	//   
 
 	internal class SolarInfo {
@@ -1903,7 +1916,7 @@ namespace WUnderground {
 		internal DateTime Sunset { get; private set; }
 		internal static ILogger Logger { get; set; }
 
-		private SolarInfo () { }
+		private SolarInfo() { }
 
 		internal static SolarInfo ForDate(double latitude,
 				double longitude, DateTime date) {
@@ -1919,70 +1932,86 @@ namespace WUnderground {
 			double jd = JulianDate(month, day, year);
 			double ed = jd - JDE;
 
-   			double lambda1 = solar_lon(ed);
-    		double lambda2 = solar_lon(ed + 1.0);
+			double lambda1 = solar_lon(ed);
+			double lambda2 = solar_lon(ed + 1.0);
 
 			double alpha1;
 			double alpha2;
 			double delta1;
 			double delta2;
 
+			// For some reason, this code thinks that west longitudes should
+			// be positive, not negative. Reverse the sign.
+			longitude *= -1.0;
 
-			tzl = localzone.GetUtcOffset(date).Hours;
-			if (localzone.IsDaylightSavingTime(date)) {
-				tzl -= 1;
-			}
+			// Again, the code seems to think that the timezone offset
+			// is backwards I.E. PST is 8 hrs, not -8 hrs from GMT.
+			tzl = localzone.GetUtcOffset(date).Hours * -1;
 
 			alpha1 = atan_q_deg((Math.Sin(deg2rad(lambda1))) *
 					Math.Cos(deg2rad(23.441884)),
 					Math.Cos(deg2rad(lambda1))) / 15.0;
 
-    		delta1 = asin_deg(Math.Sin(deg2rad(23.441884)) *
+			delta1 = asin_deg(Math.Sin(deg2rad(23.441884)) *
 					Math.Sin(deg2rad(lambda1)));
 
 			alpha2 = atan_q_deg((Math.Sin(deg2rad(lambda2))) *
 					Math.Cos(deg2rad(23.441884)),
 					Math.Cos(deg2rad(lambda2))) / 15.0;
 
-    		delta2 = asin_deg(Math.Sin(deg2rad(23.441884)) *
+			delta2 = asin_deg(Math.Sin(deg2rad(23.441884)) *
 					Math.Sin(deg2rad(lambda2)));
 
+			//Logger.Debug("Right ascension, declination for lon " + lambda1.ToString() + "is " + alpha1.ToString() + ", " + delta1.ToString());
+			//Logger.Debug("Right ascension, declination for lon " + lambda2.ToString() + "is " + alpha2.ToString() + ", " + delta2.ToString());
+
+
 			double st1r = rise(alpha1, delta1, latitude);
-			double st1s = set (alpha1, delta1, latitude);
+			double st1s = set(alpha1, delta1, latitude);
 			double st2r = rise(alpha2, delta2, latitude);
-			double st2s = set (alpha2, delta2, latitude);
+			double st2s = set(alpha2, delta2, latitude);
 
-    		double m1 = adj24(gmst(jd - 0.5, 0.5 + tzl / 24.0) - longitude / 15 );
+			double m1 = adj24(gmst(jd - 0.5, 0.5 + tzl / 24.0) - longitude / 15);
 
-    		double hsm = adj24(st1r - m1);
+			//Logger.Debug("local sidreal time of midnight is " + m1.ToString() + "  lon = " + longitude.ToString());
 
-    		double ratio = hsm / 24.07;
+			double hsm = adj24(st1r - m1);
+			//Logger.Debug("about " + hsm.ToString() + " hourse from midnight to dawn");
 
-    		if (Math.Abs(st2r - st1r) > 1.0 ) {
+			double ratio = hsm / 24.07;
+			//Logger.Debug(ratio.ToString() + " is how far dawn is into the day");
+
+			if (Math.Abs(st2r - st1r) > 1.0) {
 				st2r += 24.0;
-    		}
+				//Logger.Debug("st2r corrected from " + (st2r-24.0).ToString() + " to " + st2r.ToString());
+			}
 
-    		double trise = adj24((1.0 - ratio) * st1r + ratio * st2r);
+			double trise = adj24((1.0 - ratio) * st1r + ratio * st2r);
 
-    		hsm = adj24(st1s - m1);
-    		ratio = hsm / 24.07;
+			hsm = adj24(st1s - m1);
+			//Logger.Debug("about " + hsm.ToString() + " hours from midnight to sunset");
+			ratio = hsm / 24.07;
+			//Logger.Debug(ratio.ToString() + " is ho far sunset is into the day");
 
-    		if (Math.Abs(st2s - st1s) > 1.0) {
+			if (Math.Abs(st2s - st1s) > 1.0) {
 				st2s += 24.0;
-    		}
+				//Logger.Debug("st2s corrected from " + (st2s-24.0).ToString() + " to " + st2s.ToString());
+			}
 
-    		double tset = adj24((1.0 - ratio) * st1s + ratio * st2s);
+			double tset = adj24((1.0 - ratio) * st1s + ratio * st2s);
+			//Logger.Debug("Uncorrected rise = " + trise.ToString() + ", set = " + tset.ToString());
 
-    		//$ar = $a1r * 360.0 / (360.0 + $a1r - $a2r);
-    		//$as = $a1s * 360.0 / (360.0 + $a1s - $a2s);
+			//$ar = $a1r * 360.0 / (360.0 + $a1r - $a2r);
+			//$as = $a1s * 360.0 / (360.0 + $a1s - $a2s);
 
-    		double delta = (delta1 + delta2) / 2.0;
-    		double tri = acos_deg(sin_deg(latitude)/cos_deg(delta));
+			double delta = (delta1 + delta2) / 2.0;
+			double tri = acos_deg(sin_deg(latitude) / cos_deg(delta));
 
-    		double x = 0.835608;      // correction for refraction, parallax
-    		double y = asin_deg(sin_deg(x)/sin_deg(tri));
-    		// $da = &asin_deg(&tan_deg($x)/&tan_deg($tri));
-    		double dt = 240.0 * y / cos_deg(delta) / 3600;
+			double x = 0.835608;      // correction for refraction, parallax
+			double y = asin_deg(sin_deg(x) / sin_deg(tri));
+			// $da = &asin_deg(&tan_deg($x)/&tan_deg($tri));
+			double dt = 240.0 * y / cos_deg(delta) / 3600;
+			//Logger.Debug("Corrections: dt = " + dt.ToString());
 
 			info.Sunrise = date.Date.AddMinutes(
 					lst_to_hm(trise - dt, jd, tzl, longitude, year));
@@ -2047,7 +2076,7 @@ namespace WUnderground {
 			int b;
 			double jd;
 
-			if ((m == 1) || (m == 2) ) {
+			if ((m == 1) || (m == 2)) {
 				y--;
 				m += 12;
 			}
@@ -2062,6 +2091,7 @@ namespace WUnderground {
 			b += (int)(y * 365.25);
 			b += (int)((30.6001 * (m + 1.0)));
 			jd = (double)d + (double)b + 1720994.5;
+			//Logger.Debug("Julian date for " + m.ToString() + "/" + d.ToString() + "/" + y.ToString() + " is " + jd.ToString());
 
 			return jd;
 		}
@@ -2085,15 +2115,16 @@ namespace WUnderground {
 			m = n + 278.83354 - 282.596403;
 			m = adj360(m);
 			m = deg2rad(m);
-			e = m; 
+			e = m;
 			ect = 0.016718;
 
 			while ((errt = e - ect * Math.Sin(e) - m) > 0.0000001) {
 				e = e - errt / (1 - ect * Math.Cos(e));
 			}
 
-			v = 2 * Math.Atan(1.0168601 * Math.Tan(e/2));
+			v = 2 * Math.Atan(1.0168601 * Math.Tan(e / 2));
 			v = adj360(((v * 180.0) / Math.PI) + 282.596403);
+			//Logger.Debug("Solar Longitude for " + ed.ToString() + " days is " + v.ToString());
 
 			return v;
 		}
@@ -2125,14 +2156,14 @@ namespace WUnderground {
 		//  returns the arc tangent in degrees and does what to it?
 
 		private static double atan_q_deg(double y, double x) {
-    		double rv;
+			double rv;
 
 			if (y == 0) {
 				rv = 0;
 			} else if (x == 0) {
 				rv = (y > 0) ? 90.0 : -90.0;
 			} else {
-				rv = atan_deg(y/x);
+				rv = atan_deg(y / x);
 			}
 
 			if (x < 0) {
@@ -2195,7 +2226,7 @@ namespace WUnderground {
 
 			double tar = sin_deg(delta) / cos_deg(lat);
 
-			if ((tar < -1.0) || (tar > 1.0) ) {
+			if ((tar < -1.0) || (tar > 1.0)) {
 				return 0.0;
 			}
 
@@ -2212,7 +2243,7 @@ namespace WUnderground {
 
 			double tar = sin_deg(delta) / cos_deg(lat);
 
-			if ((tar < -1.0) || (tar > 1.0) ) {
+			if ((tar < -1.0) || (tar > 1.0)) {
 				return 0.0;
 			}
 
@@ -2231,7 +2262,7 @@ namespace WUnderground {
 		//
 		//  converts a time value and juilan date to minutes past midnight
 
-		private static int  lst_to_hm(double lst, double jd, double tzl, 
+		private static int lst_to_hm(double lst, double jd, double tzl,
 				double lon, int yr) {
 
 			double gst = lst + lon / 15.0;
@@ -2244,7 +2275,7 @@ namespace WUnderground {
 			double ed = jd - jzjd;
 			double t = (jzjd - 2415020.0) / 36525.0;
 			double r = 6.6460656 + 2400.05126 * t + 2.58E-05 * t * t;
-			double b = 24.0 - ( r - 24.0 * (yr - 1900) );
+			double b = 24.0 - (r - 24.0 * (yr - 1900));
 			double t0 = ed * 0.0657098 - b;
 
 			if (t0 < 0.0) {
@@ -2257,7 +2288,7 @@ namespace WUnderground {
 			}
 
 			gmt = gmt * 0.99727 - tzl;
-			if ( gmt < 0 ) {
+			if (gmt < 0) {
 				gmt += 24.0;
 			}
 
@@ -2280,8 +2311,8 @@ namespace WUnderground {
 			double t = d / 36525.0;
 			double t1 = Math.Floor(t);
 			double j0 = t1 * 36525.0 + 2451545.0;
-			double t2 = (j - j0 + 0.5)/36525.0;
-			double s = 24110.54841 + 184.812866 * t1; 
+			double t2 = (j - j0 + 0.5) / 36525.0;
+			double s = 24110.54841 + 184.812866 * t1;
 			s += 8640184.812866 * t2;
 			s += 0.093104 * t * t;
 			s -= 0.0000062 * t * t * t;
@@ -2295,6 +2326,7 @@ namespace WUnderground {
 				s -= 24.0;
 			}
 
+			//Logger.Debug("For jd = " + j.ToString() + ", f = " + f.ToString() + " , gst = " + s.ToString());
 			return s;
 		}
 
@@ -2309,5 +2341,4 @@ namespace WUnderground {
 		}
 	} // End of SolarInfo class
 	#endregion
-
 }
