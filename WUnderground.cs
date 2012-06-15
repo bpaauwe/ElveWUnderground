@@ -817,6 +817,50 @@ namespace WUnderground {
             }
         }
 
+		//
+		//  New properties for Elve 2.0
+		//
+		[ScriptObjectPropertyAttribute("Paged List Forecast", "Provides the list of daily forcasts to be shown in a Touch Screen Interface's Paged List control. The item value has the following properties: Index. Index is the index for the weather driver property arrays.")]
+		[SupportsDriverPropertyBinding]
+		public ScriptPagedListCollection PagedListForecast {
+			get {
+				var dates = this.Dates;
+				var highs = this.Highs;
+				var lows = this.Lows;
+				var conditions = this.Conditions;
+
+				var list = new List<ScriptPagedListItem>();
+
+				// Add dates.
+				for (int i = dates.PrimitiveLowestIndex; i <= dates.PrimitiveHighestIndex; i++) {
+					string title = ((DateTime)(ScriptDateTime)dates[i]).ToString("dddd"); // full day of week name. ex: "Monday"
+					string subtitle = (int)(ScriptNumber)highs[i] + "\u00B0 / " + (int)(ScriptNumber)lows[i] + "\u00B0  " + (string)(ScriptString)conditions[i];
+					ScriptExpandoObject value = new ScriptExpandoObject();
+					value.SetProperty("Index", new ScriptNumber(i));
+
+					list.Add(new ScriptPagedListItem(title, subtitle, value));
+				}
+
+				return new ScriptPagedListCollection(list);
+			}
+		}
+
+		[ScriptObjectPropertyAttribute("Paged List Forecast With Current Condition", "Provides the current condition and a list of daily forcasts to be shown in a Touch Screen Interface's Paged List control. The item value has the following properties: Index. Index is the index for the weather driver property arrays.")]
+		[SupportsDriverPropertyBinding]
+		public ScriptPagedListCollection PagedListForecastWithCurrentCondition {
+			get {
+				var list = PagedListForecast;
+
+				// Insert current condition
+				string title = "Current";
+				string subtitle = (int)this.Temperature + "\u00B0" + "  " + (string)this.CurrentCondition;
+				ScriptExpandoObject value = new ScriptExpandoObject();
+				value.SetProperty("Index", new ScriptNumber(0));
+				list.Insert(0, new ScriptPagedListItem(title, subtitle, value));
+
+				return list;
+			}
+		}
 
 		//
 		// ----------------------------------------------------------------
