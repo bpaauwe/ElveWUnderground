@@ -115,7 +115,7 @@ namespace ElveWUnderground {
 			DriverCommunicationPort.Network,
 			DriverMultipleInstances.MultiplePerDriverService,
 			1, // Major version
-			6, // Minor version
+			7, // Minor version
 			DriverReleaseStages.Production,
 			"Weather Underground, Inc.",
 			"http://www.wunderground.com/",
@@ -1206,11 +1206,13 @@ namespace ElveWUnderground {
 		//
 		private void PollWUnderground(Object sender, EventArgs e) {
 			int stations_tried = 0;
+            WeatherData old;
 
 			// How many stations have actually been defined?  Should only
 			// attempt to query defined stations.
 
 			while (stations_tried < m_station_id_cnt) {
+                old = CopyWeatherData(m_weather);
 				if (ReadWeatherData(m_station_id[m_last_station_id])) {
 					stations_tried = m_station_id_cnt + 1;  // 
 					ApparentTemp();
@@ -1237,6 +1239,8 @@ namespace ElveWUnderground {
 					DevicePropertyChangeNotification("WindSpeed", m_weather.WindSpeed);
 					DevicePropertyChangeNotification("Windchill", m_weather.GetWindChill());
 					DevicePropertyChangeNotification("ApparentTemperature", m_weather.GetApparentTemperature());
+
+                    TriggerHandler(old, m_weather);
 				} else {
 					// Station failed to provide data.  Try another
 					if (++m_last_station_id >= m_station_id_cnt) {
@@ -1408,6 +1412,85 @@ namespace ElveWUnderground {
 					return "Unknown";
 			}
 		}
+
+    #region "Driver Events"
+        private WeatherData CopyWeatherData(WeatherData old) {
+            WeatherData copy = new WeatherData(m_metric);
+
+            copy.Temperature = old.Temperature;
+            copy.Humidity = old.Humidity;
+            copy.WindSpeed = old.WindSpeed;
+            copy.WindGust = old.WindGust;
+            copy.PressureString = old.PressureString;
+            copy.Precipitation = old.Precipitation;
+
+            return copy;
+        }
+
+
+        [DriverEvent("Weather Trigger", "Occurs when there is a change in weather conditions.")]
+        [DriverEventParameterAttribute("Condition", "The weather condition that changed.", false)]
+        [DriverEventArg("Value", "The value of the condition that changed.", typeof(ScriptNumber))]
+        public DriverEvent WeatherTrigger;
+
+        private void TriggerHandler(WeatherData old, WeatherData now) {
+            DriverEventArgDictionary eventArgs;
+            DriverEventParameterDictionary eventParameters;
+
+            if (old.Temperature != now.Temperature) {
+                eventParameters = new DriverEventParameterDictionary();
+                eventArgs = new DriverEventArgDictionary();
+
+                eventParameters.Add("Condition", "Temperature", true);
+                eventArgs.Add("Value", new ScriptNumber(now.Temperature));
+                Logger.DebugFormat("{0}: Raise Trigger for new temperature {1}", DeviceName, now.Temperature);
+                RaiseDeviceEvent(WeatherTrigger, eventParameters, eventArgs);
+            }
+
+            if (old.Humidity != now.Humidity) {
+                eventParameters = new DriverEventParameterDictionary();
+                eventArgs = new DriverEventArgDictionary();
+
+                eventParameters.Add("Condition", "Humidity", true);
+                eventArgs.Add("Value", new ScriptNumber(now.Humidity));
+                Logger.DebugFormat("{0}: Raise Trigger for new humidity {1}", DeviceName, now.Humidity);
+                RaiseDeviceEvent(WeatherTrigger, eventParameters, eventArgs);
+            }
+
+            if (old.WindSpeed != now.WindSpeed) {
+                eventParameters = new DriverEventParameterDictionary();
+                eventArgs = new DriverEventArgDictionary();
+
+                eventParameters.Add("Condition", "WindSpeed", true);
+                eventArgs.Add("Value", new ScriptNumber(now.WindSpeed));
+                Logger.DebugFormat("{0}: Raise Trigger for new wind speed {1}", DeviceName, now.WindSpeed);
+                RaiseDeviceEvent(WeatherTrigger, eventParameters, eventArgs);
+            }
+
+            if (old.WindGust != now.WindGust) {
+                eventParameters = new DriverEventParameterDictionary();
+                eventArgs = new DriverEventArgDictionary();
+
+                eventParameters.Add("Condition", "WindGust", true);
+                eventArgs.Add("Value", new ScriptNumber(now.WindGust));
+                Logger.DebugFormat("{0}: Raise Trigger for new wind gust {1}", DeviceName, now.WindGust);
+                RaiseDeviceEvent(WeatherTrigger, eventParameters, eventArgs);
+            }
+
+            if (old.Precipitation != now.Precipitation) {
+                eventParameters = new DriverEventParameterDictionary();
+                eventArgs = new DriverEventArgDictionary();
+
+                eventParameters.Add("Condition", "Precipitation", true);
+                eventArgs.Add("Value", new ScriptNumber(now.Precipitation));
+                Logger.DebugFormat("{0}: Raise Trigger for new precipitation {1}", DeviceName, now.Precipitation);
+                RaiseDeviceEvent(WeatherTrigger, eventParameters, eventArgs);
+            }
+
+            // TODO: Add other values
+        }
+
+    #endregion
 
 	}
 
@@ -1737,11 +1820,12 @@ namespace ElveWUnderground {
 			}
 		}
 
+
+
 	}
 
-
-	#region "SolarInfo sunrise/sunset calculations"
-	//
+    #region "SolarInfo sunrise/sunset calculations"
+    //
 	// SolarInfo
 	// 
 	//  Calculate sunrise and sunset times for a specific latitude and
