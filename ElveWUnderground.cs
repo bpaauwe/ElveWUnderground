@@ -878,6 +878,7 @@ namespace ElveWUnderground {
 								m_weather.Longitude = DParse(n.SelectNodes(".//longitude")[0].InnerText);
 								m_weather.ForecastLoc = n.SelectNodes(".//latitude")[0].InnerText;
 								m_weather.ForecastLoc += "," + n.SelectNodes(".//longitude")[0].InnerText;
+                                Logger.Debug("Forecast location = " + m_weather.ForecastLoc);
 								if (m_station_location == "") {
 									m_station_location = m_weather.ForecastLoc;
 								}

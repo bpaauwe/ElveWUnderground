@@ -931,21 +931,26 @@ namespace WUnderground {
 				// for the features we want to process.
 
 				foreach (XmlNode n in node.ChildNodes) {
-					Logger.Debug(" -> " + n.Name + "  : " + n.InnerText);
+					Logger.Debug(" feature -> " + n.Name + "  : " + n.InnerText);
 					switch (n.Name) {
 						case "version": // Version of the API
+                            Logger.Debug("    version = " + n.InnerText);
 							break;
 						case "termsofService": // URL for the terms of service
 							break;
 						case "features": // List of features reported in this query
+                            Logger.Debug("    features = " + n.InnerText);
 							break;
 						case "forecast":
+                            Logger.Debug(" Parse Forecast Data:");
 							err = ParseForecastData(n);
 							break;
 						case "current_observation":
+                            Logger.Debug(" Parse Condition Data:");
 							err = ParseConditionData(n);
 							break;
 						case "moon_phase":
+                            Logger.Debug(" Parse Astronomy Data:");
 							err = ParseAstronomyData(n);
 							break;
 					}
