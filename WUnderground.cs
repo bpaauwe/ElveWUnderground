@@ -116,12 +116,12 @@ namespace WUnderground {
 			"  autoip              ex: autoip\r\n",
 			"Robert Paauwe",
 			"Weather",
-			"",
+			"WUnderground",
 			"weather",
 			DriverCommunicationPort.Network,
 			DriverMultipleInstances.MultiplePerDriverService,
 			1, // Major version
-			1, // Minor version
+			2, // Minor version
 			DriverReleaseStages.Production,
 			"Weather Underground, Inc.",
 			"http://www.wunderground.com/",
