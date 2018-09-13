@@ -902,13 +902,15 @@ namespace WUnderground {
 			XmlNode node;
 			bool err = true;
 
-			Logger.Debug("Read data from web site.");
 			url =
 				"http://api.wunderground.com/api/" + key +
 				"/" + FEATURES.conditions.ToString() +  "/" +
 				"/" + FEATURES.forecast7day.ToString() +  "/" +
 				"/" + FEATURES.astronomy.ToString() +  "/" +
 				"q/" + station + ".xml";
+
+			Logger.Debug("Read data from web site.");
+			Logger.Debug("URL=" + url);
 
 			// Send the HTTP request and get the XML response.
 			try {
@@ -953,6 +955,10 @@ namespace WUnderground {
                             Logger.Debug(" Parse Astronomy Data:");
 							err = ParseAstronomyData(n);
 							break;
+                        default:
+                            Logger.Debug("Unknown feature [" + n.Name + "]");
+                            err = false;
+                            break;
 					}
 				}
 			} catch (Exception ex) {
